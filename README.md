@@ -57,3 +57,9 @@ src/
 ## Git 流程
 
 不要直接 push 到 `main`；開分支 `frontend/<功能>`，PR 經其他組員 review 後 merge。
+
+GitHub org 已從 `TBIBBB` 改名為 `TPIBBB`。舊的 clone 請更新 remote：
+
+```bash
+git remote set-url origin https://github.com/TPIBBB/tpi_frontend.git
+```
