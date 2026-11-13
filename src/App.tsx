@@ -5,6 +5,7 @@ import { AgentTable } from "./components/AgentTable";
 import { EventTimeline } from "./components/EventTimeline";
 import { MarketPanel } from "./components/MarketPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
+import { PriceChart } from "./components/PriceChart";
 import { useWorld } from "./useWorld";
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
           <EventTimeline events={events} />
         </div>
       )}
+      <PriceChart metrics={metrics} band={state?.band ?? null} />
       <MetricsPanel metrics={metrics} />
       {!offlineFile && state && <AgentTable citizens={state.citizens} />}
     </main>
