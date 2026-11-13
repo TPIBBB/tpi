@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { parseJsonl } from "./api/client";
-import type { TickMetrics } from "./api/types";
+import { PHASE_LABEL, type TickMetrics } from "./api/types";
 import { AgentTable } from "./components/AgentTable";
 import { EventTimeline } from "./components/EventTimeline";
 import { MarketPanel } from "./components/MarketPanel";
@@ -25,7 +25,7 @@ export default function App() {
             離線紀錄：{offlineFile} <button onClick={() => setOfflineFile(null)}>回到即時</button>
           </span>
         ) : (
-          state && <span>第 {state.tick} 回合</span>
+          state && <span>第 {state.tick} 回合・{PHASE_LABEL[state.phase] ?? state.phase}</span>
         )}
         <label className="file">
           載入離線紀錄（metrics.jsonl）
@@ -41,17 +41,17 @@ export default function App() {
       </header>
 
       {!offlineFile && error && (
-        <p className="error">連不到後端：{error}（請先在後端執行 python -m civsim serve）</p>
+        <p className="error">連不到後端：{error}（請先在後端執行 civsim serve）</p>
       )}
 
       {!offlineFile && state && (
         <div className="grid">
-          <MarketPanel market={state.market} />
+          <MarketPanel state={state} />
           <EventTimeline events={events} />
         </div>
       )}
       <MetricsPanel metrics={metrics} />
-      {!offlineFile && state && <AgentTable agents={state.agents} />}
+      {!offlineFile && state && <AgentTable citizens={state.citizens} />}
     </main>
   );
 }
