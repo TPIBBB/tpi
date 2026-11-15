@@ -3,11 +3,13 @@
 啟動：civsim serve --config configs/baseline.yaml
 文件：http://localhost:8000/docs
 
-/admin/*   給實驗控制器呼叫（推進回合）
-/world/*   給前端視覺化讀取（前端在另一個 repo：TPIBBB/tpi_frontend）
+/world/*   給前端視覺化讀取（前端在另一個 repo：TPIBBB/tpi_frontend），只能讀，不能推進世界
 /runs/*    給政府 client 呼叫（api/government.py，格式見 docs/api.md）
 
-平民在 world-api 內部計算，不走 API。政府的路徑是 lockstep：政府每送一次決策，世界就前進一天。
+平民在 world-api 內部計算，不走 API。政府的路徑是 lockstep：政府每送一次決策，世界就前進一天；
+世界只會因為政府的決策前進（原本的 POST /admin/step 已停用，見 docs/api.md 的 D9）。
+
+⚠️ /world/disasters 是天災時間表，不能開放給政府的 client（政府不能事先知道天災何時發生）。
 
 前端允許的來源由環境變數 CIVSIM_CORS_ORIGINS 設定（逗號分隔），預設為 Vite 開發伺服器。
 
@@ -26,7 +28,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from civsim.api.government import AWAITING_REFLECTION, ApiError, create_government_router, run_status
+from civsim.api.government import ApiError, create_government_router
 from civsim.models import Event
 from civsim.world import SimulationEngine
 
@@ -41,26 +43,13 @@ def create_app(engine: SimulationEngine, run_id: str | None = None) -> FastAPI:
     lock = threading.Lock()  # 同一時間只有一個請求能推進世界
     origins = os.getenv("CIVSIM_CORS_ORIGINS", "http://localhost:5173").split(",")
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET"], allow_headers=["*"])
-    event_log: list[Event] = []
+    event_log: list[Event] = []  # 政府的路徑推進世界時寫入，GET /world/events 讀取
 
     @app.exception_handler(ApiError)
     def api_error(request: Request, exc: ApiError):
         return JSONResponse(status_code=exc.status_code, content={"error": exc.error, "message": exc.message})
 
-    app.include_router(create_government_router(engine, app.state.run_id, lock))
-
-    @app.post("/admin/step")
-    def step():
-        """用本機的政府（或沒有政府）推進一回合。
-
-        TODO(前端組確認)：政府經 API 決策時，呼叫這條會讓世界在政府不知道的情況下多跑一天（docs/api.md 的 D9）。
-        政府下一次送決策會因為 tick 對不上收到 409。
-        """
-        with lock:
-            if run_status(engine) == AWAITING_REFLECTION:
-                raise ApiError(409, "wrong_status", "正在等待政府反思，請先送出記憶")
-            event_log.extend(engine.step())
-            return engine.history[-1]
+    app.include_router(create_government_router(engine, app.state.run_id, lock, event_log))
 
     @app.get("/world/state")
     def world_state():
@@ -87,5 +76,10 @@ def create_app(engine: SimulationEngine, run_id: str | None = None) -> FastAPI:
     @app.get("/world/events")
     def world_events(since_tick: int = 0):
         return [asdict(e) for e in event_log if e.tick >= since_tick]
+
+    @app.get("/world/disasters")
+    def world_disasters():
+        """天災時間表，欄位沿用引擎的 Disaster（docs/api.md 的 D10）。只開放給前端，不能給政府。"""
+        return [asdict(d) for d in engine.schedule]
 
     return app

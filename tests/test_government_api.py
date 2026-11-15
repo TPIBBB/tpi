@@ -157,11 +157,10 @@ def test_reflection_pauses_before_reset(client, engine):
     assert len(data["report"]["decisions"]) > 0  # 政府看得到這次天災自己做過的決策
 
 
-def test_cannot_decide_or_step_while_reflecting(client, engine):
+def test_cannot_decide_while_reflecting(client, engine):
     reach_reflection(client, engine)
     assert client.get(OBS).json()["error"] == "wrong_status"
     assert decide(client, engine.world.tick).json()["error"] == "wrong_status"
-    assert client.post("/admin/step").status_code == 409
 
 
 def test_reflection_paths_only_while_reflecting(client):

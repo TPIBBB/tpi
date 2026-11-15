@@ -94,8 +94,10 @@ def _decision_records(events: list[Event]) -> list[dict]:
     return records
 
 
-def create_government_router(engine, run_id: str, lock: threading.Lock) -> APIRouter:
-    """lock 和 /admin/step 共用，同一時間只有一個請求能推進世界。"""
+def create_government_router(engine, run_id: str, lock: threading.Lock, event_log: list[Event]) -> APIRouter:
+    """lock：同一時間只有一個請求能推進世界。
+    event_log：世界前進時產生的事件都寫進這裡，前端從 GET /world/events 讀取。
+    """
     router = APIRouter(tags=["government"])
     engine.remote_reflection = True  # 政府在 API 的另一端，反思要等 POST memory
 
@@ -148,6 +150,7 @@ def create_government_router(engine, run_id: str, lock: threading.Lock) -> APIRo
                                     "accepted": False, "rejected_reason": f"未知的決策類型 {a.type!r}"})
 
             events = engine.step(decided)
+            event_log.extend(events)
             return {
                 "run_id": run_id,
                 "tick": tick,
@@ -170,6 +173,7 @@ def create_government_router(engine, run_id: str, lock: threading.Lock) -> APIRo
         with lock:
             check(rid, AWAITING_REFLECTION)
             events = engine.submit_memory(body.memory)
+            event_log.extend(events)  # 記憶的結果與調回均衡狀態
             result = next(MEMORY_RESULTS[e.kind] for e in events if e.kind in MEMORY_RESULTS)
             return {
                 "run_id": run_id,
