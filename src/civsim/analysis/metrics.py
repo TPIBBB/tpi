@@ -43,6 +43,8 @@ def snapshot_metrics(world: WorldState, clearing, events: list[Event], day: int)
         "citizen_food": round(sum(c.food for c in living), 4),
         "citizen_money": round(sum(c.money for c in living), 4),
         "money_gini": round(gini([c.money for c in living]), 4),
+        "avg_citizen_food": round(sum(c.food for c in living)/ len(living), 4) if living else 0.0,
+        "food_gini": round(gini([c.food for c in living]), 4),
         # 政府
         "gov_budget": round(world.government.budget, 4),
         "gov_reserve": round(world.government.food_reserve, 4),
