@@ -124,6 +124,10 @@ architecture.md 的那一段要同步改成指向本文件。
         "tick": 35, "type": "issue_currency", "params": {"amount": 500}, "reason": "補預算",
         "accepted": false, "rejected_reason": "違反社會規則：不能發行貨幣"
       }
+    ],
+    "price_history": [
+      {"tick": 35, "price": 5.12},
+      {"tick": 36, "price": 9.84}
     ]
   }
 }
@@ -143,8 +147,11 @@ architecture.md 的那一段要同步改成指向本文件。
 | `price_cap` | 目前生效的價格上限 `{"price": 12.0, "until": 40}`，沒有就是 `null` |
 | `citizens` | 平民的 id 與類型（**不含**存糧與存款） |
 | `recent_decisions` | 這次天災週期內最近 20 筆決策與結果，被拒絕的有 `rejected_reason` |
+| `recent_decisions[].replayed` | `true` = LLM 當天沒被呼叫，沿用上次的決策（`call_policy: on_change`）；結算方式相同，只是分析時要分開算 |
+| `price_history` | 這次天災週期內每天的成交價，由舊到新，最後一筆就是 `prices.food`；重置後清空。長度由 `government.price_history_days` 控制（預設整個週期）。**不含**均衡區間 |
 
-政府**看不到**：平民的存糧與存款、天災時間表、這個週期的第幾天（11/9 會議決定，不提供預報）。
+政府**看不到**：平民的存糧與存款、天災時間表、均衡區間（11/9 會議決定，不提供預報）。
+`price_history` 的長度等於這個週期過了幾天，政府推得出週期的第幾天；這是 11/20 決定接受的副作用（見 architecture.md）。
 
 ### `POST /runs/{run_id}/government/decisions`
 
@@ -164,6 +171,7 @@ architecture.md 的那一段要同步改成指向本文件。
 - `tick`：必填，必須等於目前的 tick（D3）。
 - `actions`：決策清單。**不想行動就送空陣列 `[]`** 或 `[{"type": "idle"}]`。
 - 一天只能有一個決策（`max_decisions_per_day: 1`）。送超過一個**不會**被 API 擋下，會交給引擎處理：第一個照常執行，其餘記成「超過每天的決策上限」被拒絕，政府隔天在 `recent_decisions` 看得到。這是研究資料的一部分，所以不在 HTTP 層擋。
+- `actions[].replayed`：選填，預設 `false`。政府端沒呼叫 LLM、沿用上次的決策時填 `true`（`civsim govern` 會自動填），只做紀錄，結算方式相同。
 - 可用的 `type` 和 `params` 見 [society.md 的「政府的行動」](society.md#政府的行動worldgovernmentpy)。參數合不合法由引擎檢查，不在 HTTP 層檢查。
 
 **回應 200（D5）：**

@@ -53,6 +53,8 @@ class GovernmentConfig:
     import_premium: float = 1.5  # 進口單價 = 習慣價格 × 這個倍率
     max_import_per_day: float = 100.0
     recent_decisions: int = 20  # 觀察裡保留最近幾筆決策結果
+    # 觀察裡的價格歷史：這次週期內政府自己看過的每日成交價，None = 整個週期。不含均衡區間（11/20 決定）
+    price_history_days: int | None = None
     # 什麼時候呼叫 LLM（agents/government.py）：always = 每天；on_change = 狀況沒變就沿用上次的決策，不呼叫
     call_policy: str = "always"
     price_tolerance: float = 0.05  # on_change：價格和上次呼叫時相差不到 5% 算沒變

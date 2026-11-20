@@ -29,7 +29,7 @@ def build_government(config: SimConfig) -> GovernmentController | None:
     if controller == "llm":
         g = config.government
         return make_government(call_policy=g.call_policy, price_tolerance=g.price_tolerance,
-                               max_skip_days=g.max_skip_days)
+                               max_skip_days=g.max_skip_days, memory_max_chars=g.memory_max_chars)
     raise ValueError(f"未知的 government.controller: {controller}")
 
 

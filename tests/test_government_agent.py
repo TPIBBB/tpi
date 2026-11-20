@@ -13,6 +13,7 @@ from civsim.agents.government import (
     parse_memory,
 )
 from civsim.agents.llm import ParseError, ScriptedClient
+from civsim.config import GovernmentConfig
 from civsim.world.government import GovernmentActionType, GovernmentDecision, GovernmentObservation
 
 IDLE = '{"actions": [{"type": "idle", "reason": "觀望"}]}'
@@ -172,6 +173,30 @@ def test_reflect_returns_new_memory_and_records_call():
     assert gov.calls[-1].tick == 20 and gov.calls[-1].trigger == "reflect"
 
 
+def test_reflect_prompt_states_memory_limit():
+    seen = {}
+
+    def respond(system, user):
+        seen["system"], seen["user"] = system, json.loads(user)
+        return '{"memory": null}'
+
+    LLMGovernment(ScriptedClient(respond), memory_max_chars=1234).reflect(REPORT, "舊記憶")
+    assert "1234" in seen["system"]
+    assert seen["user"]["current_memory_chars"] == len("舊記憶")
+    assert str(GovernmentConfig.memory_max_chars) in REFLECT_SYSTEM_PROMPT  # 預設值和引擎一致
+
+
+def test_build_government_passes_memory_limit(monkeypatch):
+    from civsim.agents import build_government
+    from civsim.config import SimConfig
+
+    monkeypatch.setattr("civsim.agents.government.make_client", lambda: ScriptedClient([]))
+    config = SimConfig()
+    config.government.controller = "llm"
+    config.government.memory_max_chars = 777
+    assert "777" in build_government(config).reflect_system_prompt
+
+
 def test_reflect_can_choose_not_to_change():
     assert LLMGovernment(ScriptedClient(['{"memory": null}'])).reflect(REPORT, "舊記憶") is None
 
@@ -208,7 +233,10 @@ def test_on_change_skips_when_nothing_changed_and_reuses_decision():
     gov, seen = counting_government()
     first = gov.decide(make_obs(tick=1, hungry=3))
     again = gov.decide(make_obs(tick=2, prices={"food": 5.1}, hungry=4))  # 價格差 2%、挨餓多 1 人
-    assert len(seen) == 1 and again == first
+    assert len(seen) == 1
+    # 內容和上次相同，但標記成重播：紀錄才分得出哪些是 LLM 當天親自做的決定
+    assert [(d.type, d.params, d.reason) for d in again] == [(d.type, d.params, d.reason) for d in first]
+    assert all(d.replayed for d in again) and not any(d.replayed for d in first)
     assert not gov.calls[-1].used_llm and "第 1 天" in gov.calls[-1].trigger
 
 
@@ -251,3 +279,9 @@ def test_always_policy_calls_every_day():
 def test_unknown_call_policy_fails():
     with pytest.raises(ValueError):
         LLMGovernment(ScriptedClient([]), call_policy="sometimes")
+
+
+def test_prompt_includes_compact_price_history():
+    prompt = build_prompt(make_obs(price_history=[{"tick": 1, "price": 5.0}, {"tick": 2, "price": 8.5}]))
+    assert "[[1,5.0],[2,8.5]]" in prompt
+    assert "price_history" in build_system_prompt()
