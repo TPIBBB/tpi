@@ -244,3 +244,45 @@ def test_llm_calls_are_written_to_llm_calls_jsonl(small_config, tmp_path):
     assert len(rows) == len(gov.calls) == small_config.total_ticks + small_config.disasters.count
     assert {r["trigger"] for r in rows} == {"decide", "reflect"}
     assert all(r["prompt"] and r["response"] for r in rows)
+
+
+def test_price_history_covers_current_cycle_only(small_config):
+    engine = SimulationEngine(small_config, government=None)
+    for _ in range(5):
+        engine.step()
+    engine.begin_tick()
+    obs = engine.government_observation()
+    assert [h["tick"] for h in obs.price_history] == [m["tick"] for m in engine.cycle_history]
+    assert len(obs.price_history) == 5
+    assert obs.price_history[-1]["price"] == pytest.approx(obs.prices["food"], abs=1e-4)
+    assert set(obs.price_history[0]) == {"tick", "price"}  # 不給均衡區間或 in_band
+
+    first = engine.schedule[0]
+    while engine.world.tick <= first.window_end:
+        engine.step()
+    engine.begin_tick()
+    assert engine.government_observation().price_history == []  # 重置後清空，不帶到下一次天災
+
+
+def test_price_history_days_limits_length(small_config):
+    small_config.government.price_history_days = 3
+    engine = SimulationEngine(small_config, government=None)
+    for _ in range(5):
+        engine.step()
+    engine.begin_tick()
+    assert len(engine.government_observation().price_history) == 3
+
+
+def test_replayed_decisions_are_marked_in_records(small_config):
+    """on_change 跳過 LLM 的日子照常結算，但決策紀錄與事件要標記 replayed。"""
+    gov = LLMGovernment(ScriptedClient(lambda s, u: json.dumps(
+        {"actions": [{"type": "import_food", "params": {"qty": 1}}]})),
+        call_policy="on_change", price_tolerance=10.0)  # 放寬容忍度，確保會跳過
+    engine = SimulationEngine(small_config, government=gov)
+    for _ in range(3):
+        engine.step()
+    flags = [r["replayed"] for r in engine.cycle_decisions]
+    assert flags[0] is False and any(flags[1:])  # 第一天一定呼叫 LLM，之後狀況沒變就重播
+    used = [c.used_llm for c in gov.calls]
+    assert flags == [not u for u in used]  # 紀錄的標記和 LLM 呼叫紀錄一致
+    assert all(r["accepted"] for r in engine.cycle_decisions)  # 重播的決策照常結算

@@ -135,7 +135,14 @@ class SimulationEngine:
             price_cap={"price": cap, "until": w.market.price_cap_until} if cap is not None else None,
             citizens=[{"id": c.id, "type": c.type.value} for c in w.living()],
             recent_decisions=self.cycle_decisions[-self.config.government.recent_decisions:],
+            price_history=self._price_history(),
         )
+
+    def _price_history(self) -> list[dict]:
+        """這次週期內政府看過的每日成交價。重置時 cycle_history 會清空，所以不會帶到下一次天災。"""
+        days = self.config.government.price_history_days
+        history = self.cycle_history if days is None else self.cycle_history[-days:] if days > 0 else []
+        return [{"tick": m["tick"], "price": m["price"]} for m in history]
 
     def _active_cap(self) -> float | None:
         m = self.world.market
@@ -225,7 +232,8 @@ class SimulationEngine:
         events: list[Event] = []
         accepted: list[dict] = []
         for i, d in enumerate(decisions):
-            record = {"tick": world.tick, "type": d.type.value, "params": d.params, "reason": d.reason}
+            record = {"tick": world.tick, "type": d.type.value, "params": d.params, "reason": d.reason,
+                      "replayed": d.replayed}
             error = None
             if i >= cfg.max_decisions_per_day:
                 error = f"超過每天的決策上限 {cfg.max_decisions_per_day}"
@@ -240,8 +248,10 @@ class SimulationEngine:
                 error = validate(world, d, cfg)
             if error is None:
                 event = settle(world, d, cfg)
+                event.payload["replayed"] = d.replayed
                 events.append(event)
-                record.update(accepted=True, result={k: v for k, v in event.payload.items() if k != "params"})
+                record.update(accepted=True, result={k: v for k, v in event.payload.items()
+                                                     if k not in ("params", "replayed")})
                 accepted.append({"type": d.type.value, "params": d.params})
             else:
                 events.append(Event(world.tick, "gov:rejected", GOV_ID, False, record, error))

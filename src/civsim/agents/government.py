@@ -19,11 +19,12 @@ from dataclasses import replace
 from typing import Protocol
 
 from civsim.agents.llm_client import LLMCall, LLMClient, ParseError, extract_json, make_client
+from civsim.config import GovernmentConfig
 from civsim.world.government import (
     GOV_ID, GovernmentActionType, GovernmentDecision, GovernmentObservation,
 )
 
-GOV_PROMPT_VERSION = "gov-v3"
+GOV_PROMPT_VERSION = "gov-v4"  # v4：反思 prompt 加上記憶字數上限；決策觀察加上這次週期的價格歷史
 CALL_POLICIES = ("always", "on_change")
 HUNGRY_TOLERANCE = 0.1  # on_change：挨餓人數的變化在人口的 10% 以內算沒變
 
@@ -44,7 +45,14 @@ DECISION_DOCS = {
     "execute_citizen": '{"target": 平民 id}，處決一位平民',
 }
 
-REFLECT_SYSTEM_PROMPT = """你是虛擬小鎮的政府。一次天災的評估期剛結束，請比較你的決策與實際結果，決定要不要更新你的記憶。
+DEFAULT_MEMORY_MAX_CHARS = GovernmentConfig.memory_max_chars  # 和引擎的檢查（world/engine.py）用同一個預設值
+
+
+def build_reflect_system_prompt(max_chars: int = DEFAULT_MEMORY_MAX_CHARS) -> str:
+    """反思的 system prompt。字數上限要寫進 prompt：超過上限的記憶會被引擎拒絕、維持舊版，
+    LLM 不知道上限的話，記憶越寫越長，C 組會在沒有明顯錯誤的情況下停止學習。
+    """
+    return f"""你是虛擬小鎮的政府。一次天災的評估期剛結束，請比較你的決策與實際結果，決定要不要更新你的記憶。
 
 記憶是一份 Markdown，下次天災時你會讀到它。社會會被重置回天災前的狀態，你唯一能保留的經驗就是這份記憶，所以只留下次用得上的內容：
 - 已被驗證的做法寫在「經驗」，註明依據哪幾次天災
@@ -53,8 +61,14 @@ REFLECT_SYSTEM_PROMPT = """你是虛擬小鎮的政府。一次天災的評估�
 - 發現舊內容有誤就修改或刪除
 - 社會規則不屬於記憶：記憶不能改變規則，也不能用來繞過規則
 
+字數上限：新版記憶最多 {max_chars} 個字元（含空白與換行）。超過上限的記憶會被整份拒絕，並沿用舊版記憶。
+current_memory_chars 是目前記憶的字元數；接近上限時，請合併重複的內容、刪掉過時或不重要的條目，不要只往後追加。
+
 只回傳一個 JSON 物件，不要有其他文字。memory 是完整的新版記憶，不需要修改時填 null：
-{"memory": "完整的 Markdown" | null, "reason": "一句話說明理由"}"""
+{{"memory": "完整的 Markdown" | null, "reason": "一句話說明理由"}}"""
+
+
+REFLECT_SYSTEM_PROMPT = build_reflect_system_prompt()
 
 
 class GovernmentController(Protocol):
@@ -78,7 +92,8 @@ def build_system_prompt(action_types: Iterable[GovernmentActionType] = Governmen
 你要知道的事：
 - 一天就是一回合。你每天只能做一個決策，不想行動就回傳 idle 或空清單；多送的決策會被拒絕。
 - 沒有天災預報，也不會有人告訴你天災何時開始或結束，請從價格、挨餓與死亡人數的變化自己判斷。
-- 你看得到昨天的成交價、自己的預算與儲備、人口、死亡與挨餓人數、平民的 id 與類型、目前的價格上限，看不到平民各自的存糧與存款。
+- 你看得到昨天的成交價、這次週期（上次重置以來）每天的成交價（price_history）、自己的預算與儲備、人口、死亡與挨餓人數、平民的 id 與類型、目前的價格上限，看不到平民各自的存糧與存款。
+- 沒有人會告訴你正常的糧價是多少，請從價格歷史與你的記憶自己判斷。
 - 平民類型：producer_trader（種糧並賣掉多的）、producer_self（自耕自食，不買賣）、consumer（打工，用錢買糧）、dependent（不生產也不買賣，存糧吃完只能靠政府發糧）。
 - 平民依固定規則工作與交易，有一部分人不會服從你的政策。
 - 你的決策由模擬引擎驗證；資源不足或違反社會規則的決策會被拒絕，拒絕理由會出現在近期決策裡。
@@ -95,7 +110,7 @@ def build_system_prompt(action_types: Iterable[GovernmentActionType] = Governmen
 
 
 def build_prompt(obs: GovernmentObservation) -> str:
-    """把觀察整理成三段：數字用 JSON，規則用清單，記憶保留原本的 Markdown。"""
+    """把觀察整理成四段：數字用 JSON，價格歷史壓成一行，規則用清單，記憶保留原本的 Markdown。"""
     state = {
         "tick": obs.tick,
         "prices": obs.prices,
@@ -112,15 +127,20 @@ def build_prompt(obs: GovernmentObservation) -> str:
     state = {k: v for k, v in state.items() if v is not None}
     rules = "\n".join(f"- {r}" for r in obs.rules) or "（目前沒有社會規則）"
     memory = (obs.memory or "").strip() or "（目前沒有記憶）"
+    # 價格歷史單獨一段、壓成一行：整個週期可能有近 50 天，用 indent 排版會佔掉上百行
+    history = json.dumps([[h["tick"], h["price"]] for h in obs.price_history], separators=(",", ":"))
     return (
         f"## 今天的狀態\n```json\n{json.dumps(state, ensure_ascii=False, indent=2)}\n```\n\n"
+        f"## 這次週期每天的成交價（price_history，[tick, 成交價]，由舊到新）\n{history}\n\n"
         f"## 社會規則\n{rules}\n\n"
         f"## 你的記憶\n{memory}\n"
     )
 
 
 def build_reflection_prompt(report: dict, memory: str) -> str:
-    return json.dumps({"report": report, "current_memory": memory}, ensure_ascii=False)
+    memory = memory or ""
+    return json.dumps({"report": report, "current_memory": memory, "current_memory_chars": len(memory)},
+                      ensure_ascii=False)
 
 
 # ---- 解析 ----
@@ -194,6 +214,7 @@ class LLMGovernment:
         call_policy: str = "always",
         price_tolerance: float = 0.05,
         max_skip_days: int = 5,
+        memory_max_chars: int = DEFAULT_MEMORY_MAX_CHARS,  # 要和引擎的 government.memory_max_chars 一致
     ):
         if call_policy not in CALL_POLICIES:
             raise ValueError(f"未知的 call_policy: {call_policy}，可用：{CALL_POLICIES}")
@@ -203,6 +224,7 @@ class LLMGovernment:
         self.call_policy = call_policy
         self.price_tolerance = price_tolerance
         self.max_skip_days = max_skip_days
+        self.reflect_system_prompt = build_reflect_system_prompt(memory_max_chars)
         self.calls: list[LLMCall] = []
         self.last_reflect_error: str | None = None  # 上一次反思失敗的原因；引擎用來區分「失敗」和「不修改」
         self._last_obs: GovernmentObservation | None = None  # 上次成功呼叫 LLM 時的觀察
@@ -217,7 +239,7 @@ class LLMGovernment:
                 self.calls.append(LLMCall(
                     obs.tick, GOV_ID, GOV_PROMPT_VERSION, self.client.model, used_llm=False,
                     trigger=f"skip：狀況和第 {same_as} 天差不多，沿用當天的決策"))
-                return [replace(d) for d in self._last_decisions]
+                return [replace(d, replayed=True) for d in self._last_decisions]
 
         record = self._new_call(obs.tick, "decide", build_prompt(obs))
         self._skipped = 0
@@ -255,7 +277,7 @@ class LLMGovernment:
         self.last_reflect_error = None
         self._last_obs = None  # 反思後記憶可能改了，下一天一定重新呼叫
         try:
-            record.response = self._complete(REFLECT_SYSTEM_PROMPT, prompt, record)
+            record.response = self._complete(self.reflect_system_prompt, prompt, record)
             return parse_memory(record.response)
         except Exception as e:
             record.error = self.last_reflect_error = f"{type(e).__name__}: {e}"

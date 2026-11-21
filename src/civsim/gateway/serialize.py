@@ -17,9 +17,10 @@ def observation_from_dict(data: dict[str, Any]) -> GovernmentObservation:
 
 
 def decision_to_dict(decision: GovernmentDecision) -> dict[str, Any]:
-    return {"type": decision.type.value, "params": decision.params, "reason": decision.reason}
+    return {"type": decision.type.value, "params": decision.params, "reason": decision.reason,
+            "replayed": decision.replayed}
 
 
 def decision_from_dict(data: dict[str, Any]) -> GovernmentDecision:
     return GovernmentDecision(GovernmentActionType(data["type"]), data.get("params") or {},
-                              str(data.get("reason", "")))
+                              str(data.get("reason", "")), bool(data.get("replayed", False)))

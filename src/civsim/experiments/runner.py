@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
 from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
@@ -16,8 +17,31 @@ from civsim.storage import JsonlRecorder
 from civsim.world import SimulationEngine
 
 
+def run_meta(config: SimConfig) -> dict:
+    """meta.json 的內容：config、git commit，以及 LLM 政府的模型與 prompt 版本。用來重現與比較實驗。"""
+    meta = {**asdict(config), "git": _git_state()}
+    if config.government.controller == "llm":
+        from civsim.agents.government import GOV_PROMPT_VERSION
+        from civsim.agents.llm_client import llm_settings, unlocked_settings
+
+        settings = llm_settings()
+        meta["llm"] = {**settings, "prompt_version": GOV_PROMPT_VERSION, "unlocked": unlocked_settings(settings)}
+    return meta
+
+
+def _git_state() -> dict:
+    def git(*args: str) -> str | None:
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True, check=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    status = git("status", "--porcelain")
+    return {"commit": git("rev-parse", "HEAD"), "dirty": bool(status) if status is not None else None}
+
+
 def run_one(config: SimConfig, out_dir: Path | None = None) -> SimulationEngine:
-    recorder = JsonlRecorder(out_dir, meta=asdict(config)) if out_dir else None
+    recorder = JsonlRecorder(out_dir, meta=run_meta(config)) if out_dir else None
     engine = SimulationEngine(config, recorder=recorder)
     engine.run()
     if out_dir:

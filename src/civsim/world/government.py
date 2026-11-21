@@ -45,13 +45,17 @@ class GovernmentDecision:
     type: GovernmentActionType
     params: dict[str, Any] = field(default_factory=dict)
     reason: str = ""  # 政府自述理由，只做紀錄，不影響結算
+    # True = LLM 當天沒有被呼叫（call_policy=on_change），自動重送上次的決策。結算方式完全相同，
+    # 只是讓紀錄分得出「LLM 當天親自做的決定」和「沿用的決定」，分析與 B 組人工判斷時要分開算
+    replayed: bool = False
 
 
 @dataclass
 class GovernmentObservation:
     """政府在本回合看得到的內容（11/9 會議）：價格、自己的預算與儲備、死亡與挨餓人數。
 
-    看不到平民的庫存，也看不到天災時間表與「這個週期的第幾天」（不提供預報）。
+    看不到平民的庫存、天災時間表（不提供預報）與均衡區間。
+    price_history 的長度等於週期過了幾天，政府推得出週期的第幾天；11/20 決定接受（見 docs/architecture.md）。
     """
 
     tick: int
@@ -66,6 +70,9 @@ class GovernmentObservation:
     price_cap: dict[str, Any] | None = None  # 目前生效的價格上限
     citizens: list[dict[str, str]] = field(default_factory=list)  # 平民的 id 與類型（不含庫存）
     recent_decisions: list[dict[str, Any]] = field(default_factory=list)  # 近期決策與被拒絕的理由
+    # 這次週期內每天的成交價 [{"tick": 37, "price": 9.84}, ...]，最後一筆就是 prices 的昨天成交價。
+    # 只給政府自己看過的價格，不給均衡區間（11/20 決定）：A、C 組在同一次天災內資訊對等，差距只來自跨天災的記憶
+    price_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---- 參數檢查 ----
