@@ -21,7 +21,7 @@ services:
   # 而且專案若放在 OneDrive 等同步資料夾，同步正在寫入的資料庫檔可能造成損壞。
   # ⚠️ docker compose down -v 會連 volume 一起刪掉，所有設定會消失。
   #
-  # TODO（第 2 週）：把 world-api 註冊為後端服務
+  # 匯入 world-api 的路徑、建立群組與 client 的步驟見 docs/digirunner_setup.md
 
   # 每次啟動前先檢查資料庫檔是否存在：第一次啟動就建立資料庫，之後沿用，不會覆蓋
   dgr-h2db-detect:

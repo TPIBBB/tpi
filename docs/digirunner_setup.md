@@ -1,0 +1,248 @@
+# digiRunner 設定：讓政府經過 digiRunner 呼叫 world-api
+
+照這份文件做完，政府 client 會經過 digiRunner（API Gateway）呼叫 world-api，而且 digiRunner 會檢查身分：
+政府只能用政府的路徑，**讀不到天災時間表**；前端只能讀 `/world/*`。
+
+```
+政府 client ──（用帳密換 token）──→ digiRunner :31080 ──→ world-api :8000 ──→ 模擬引擎
+                                     檢查 token 和權限
+```
+
+**誰需要做：** 要測試「經過 digiRunner」的人，例如 API 組、前端要改成經過 digiRunner 時、跑正式實驗時。
+平常寫程式、跑 pytest、`civsim run`、直連 world-api 都**不需要**。第一次大約 20 分鐘。
+
+**每個人的 digiRunner 都是各自獨立的**：跑在自己電腦的 Docker 裡，只有自己的電腦連得到，帳號密碼也要自己設。
+
+## 0. 準備
+
+- 安裝並打開 **Docker Desktop**
+- 專案更新到最新的 main
+- 專案資料夾有 `.env`（從 `.env.example` 複製）
+- 照平常的方式開 world-api，**不要**加 `--host 0.0.0.0`：
+
+  ```powershell
+  python -m civsim serve --config configs/baseline.yaml
+  ```
+
+  digiRunner 在 Docker 容器裡，用 `http://host.docker.internal:8000` 連 world-api。Docker Desktop 會把它轉到你電腦的本機，
+  所以 world-api 只聽本機（預設）也連得到，不用對外開放。
+
+設定和測試的過程中，**world-api 的終端機要一直開著**。
+
+## 1. 啟動 digiRunner
+
+在專案資料夾：
+
+```powershell
+docker compose up -d dgr
+```
+
+等 1～2 分鐘（Java 程式啟動比較慢），打開管理後台：
+
+**`http://localhost:31080/dgrv4/ac4/login`**（GitHub README 寫的 `/dgrv4/login` 少了 `ac4`，會 404）
+
+預設帳號是官方 README 寫的 `manager` / `manager123`。
+
+- `manager` 的密碼在「個人資料」改不了。想要自己的帳號，到「AC 權限管理」新增一個角色是 Administrator 的使用者
+- **不要**對 `manager` 按「重設密碼」：新密碼會寄到 `manager` 的 email，那是 digiRunner 廠商的信箱
+
+**設定會保存在哪：** `docker-compose.yml` 用的是官方的「永久資料庫」模式，設定存在 Docker 的 volume `dgrdb`，
+關機、`docker compose stop`、`docker compose down` 都不會消失。**只有 `docker compose down -v` 會全部清空。**
+
+`docker-compose.yml` 把 31080 只開放給本機（`127.0.0.1`），同一個網路的其他人連不到你的 digiRunner。
+
+## 2. 匯入 world-api 的 9 條路徑
+
+路徑已經做成匯入檔，不用一條一條手動註冊。
+
+1. 左邊選單「**API管理**」→「**API列表**」→「**匯入API**」
+2. 選 `deploy/digirunner/world-api-apis.json` → 上傳
+3. 全選列出來的 9 條 → 按「**匯入**」
+4. 「**API管理**」→「**API批量修改**」→ 全選 → 按「**啟動**」（匯入的路徑預設是停用的）
+
+確認 9 條的狀態都是綠燈，而且 **No Auth 那一欄是空的**（不能不驗證就呼叫）。
+
+| 路徑 | 給誰用 |
+|---|---|
+| `GET /runs` | 政府、前端 |
+| `GET /runs/{p}/government/observation` | 政府 |
+| `POST /runs/{p}/government/decisions` | 政府 |
+| `GET /runs/{p}/government/reflections` | 政府 |
+| `POST /runs/{p}/government/memory` | 政府 |
+| `GET /world/state`、`/world/metrics`、`/world/events`、`/world/disasters` | 前端 |
+
+路徑都用「預設模式（dgrc）」註冊，digiRunner 的路徑和 world-api 的路徑一模一樣，所以 client 只要把網址從
+`localhost:8000` 換成 `localhost:31080`，其他都不用改。
+
+## 3. 建立兩個群組
+
+群組決定「可以用哪些路徑」。
+
+「**用戶端管理**」→「**群組維護**」→「**建立**」
+
+| 欄位 | 政府群組 | 前端群組 |
+|---|---|---|
+| 群組代碼 | `gov-group` | `frontend-group` |
+| 允許使用時間 | `0`（不限制） | `0` |
+| 授權次數上限 | `0`（不限制） | `0` |
+| 安全等級 | System Security (default) | System Security (default) |
+| 群組描述 | 政府 client 可用的路徑 | 前端 client 可用的路徑 |
+
+選路徑分兩步：
+
+1. 「**選擇 Module**」勾選模組（每條路徑自己就是一個模組，模組名稱就是路徑）
+2. 每一列按「**選擇 API**」，勾選裡面那一條 API
+
+| 群組 | 要選的 5 個模組 |
+|---|---|
+| `gov-group` | `/runs`，以及 4 條 `/runs/{p}/government/...` |
+| `frontend-group` | `/runs`，以及 4 條 `/world/...` |
+
+⚠️ **`gov-group` 不能有任何 `/world/*`**。`/world/disasters` 是天災時間表，政府讀得到就等於事先知道天災何時發生，
+違反「不提供預報」的研究設計。
+
+## 4. 建立兩個 client（帳號）
+
+先產生密碼，同時寫進 `.env`（在專案資料夾執行，最後一行會印出密碼，填表單時複製它）：
+
+```powershell
+# 政府
+$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $pw = [Convert]::ToBase64String($b).Replace('+','-').Replace('/','_').TrimEnd('=')
+Add-Content .env "`nDIGIRUNNER_CLIENT_ID=civsim-gov`nDIGIRUNNER_CLIENT_SECRET=$pw"
+$pw
+```
+
+```powershell
+# 前端（只在測試權限時用到）
+$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $pw = [Convert]::ToBase64String($b).Replace('+','-').Replace('/','_').TrimEnd('=')
+Add-Content .env "`nDIGIRUNNER_FRONTEND_CLIENT_ID=civsim-frontend`nDIGIRUNNER_FRONTEND_CLIENT_SECRET=$pw"
+$pw
+```
+
+`.env` 不會被推上 GitHub。密碼不要貼到群組，截圖時也不要讓密碼入鏡。
+
+「**用戶端管理**」→「**用戶端維護**」→「**建立**」
+
+| 欄位 | 政府 | 前端 |
+|---|---|---|
+| 用戶端帳號、用戶端代號 | `civsim-gov` | `civsim-frontend` |
+| 用戶端名稱 | `civsim-gov` | `civsim-frontend` |
+| 密碼、再次確認密碼 | 剛印出來的那組 | 剛印出來的那組 |
+| 主機清單、開始日期、到期日期、服務時間 | **空白** | **空白** |
+| API 配額 | `0`（不限制） | `0` |
+| **TPS/Node** | **`0`（不限制）** | **`0`** |
+| 擁有者、用戶優先權 | 預設 | 預設 |
+| 狀態 | 啟用 | 啟用 |
+| 開放狀態 | 對內 | 對內 |
+
+- 帳號要和 `.env` 的 `DIGIRUNNER_CLIENT_ID` **一字不差**（連字號 `-`，不是底線 `_`）
+- **TPS/Node 預設是 10**（每秒最多 10 次），`civsim govern` 會超過，一定要改成 0
+- 主機清單要空白，填了的話只有那台主機能呼叫
+
+## 5. 授權與 Token 設定
+
+在「用戶端維護」的列表，按 client 那一列的「**安全性**」，對兩個 client 各做一次：
+
+**授權設定** 分頁：按「**設定群組**」→ 在搜尋框輸入**群組代碼**（`gov` 或 `frontend`）→ 勾選 → 按「**更新**」
+
+| client | 只加這一個群組 |
+|---|---|
+| `civsim-gov` | `gov-group` |
+| `civsim-frontend` | `frontend-group` |
+
+**Token 設定** 分頁：
+
+| 欄位 | 設定 |
+|---|---|
+| OAuth Grant Type | **只留 Client Credentials**（取消 Refresh Token、Password、Authorization Code） |
+| Access token expire | `1` 天 |
+| 授權次數 | **`0`（不限制）**，有數字的話 token 用到那個次數就失效，run 會跑到一半中斷 |
+
+按「**更新**」。「安全等級」維持 System Security，其他分頁不用動。
+
+## 6. 驗證
+
+**檢查身分和權限**（在專案資料夾）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/digirunner/check_auth.ps1
+```
+
+```
+OK   1. 不帶 token 呼叫 /runs           擋下（401），預期擋下
+OK   2. 政府呼叫政府的路徑               放行（200），預期放行
+OK   3. 政府呼叫 /world/disasters       擋下（403），預期擋下
+OK   4. 前端呼叫 /world/disasters       放行（200），預期放行
+OK   5. 前端呼叫政府的路徑               擋下（403），預期擋下
+
+全部符合預期
+```
+
+第 2 項如果 run 已經跑完，world-api 會回 409，仍然算「放行」：身分驗證已經通過，是 world-api 說這個 run 結束了。
+
+**經過 digiRunner 跑完整個 run**（world-api 剛啟動、還沒跑過的 run）：
+
+```powershell
+python -m civsim govern --base-url http://localhost:31080
+```
+
+最後兩行：
+
+```
+完成：共 214 天、反思 5 次，逾時後確認已送達 0 次
+經過 digiRunner：以 client civsim-gov 申請 token 1 次
+```
+
+天數和天災次數依 `configs/baseline.yaml` 而定。
+
+## 政府 client 怎麼換 token
+
+給要改 `src/civsim/gateway/client.py` 的人：
+
+- 經過 digiRunner 時，第一個請求會收到 401，client 用 `.env` 的 `DIGIRUNNER_CLIENT_ID` / `DIGIRUNNER_CLIENT_SECRET`
+  呼叫 `POST /oauth/token` 換 token，之後每個請求帶 `Authorization: Bearer <token>`
+- 換 token 的 Basic 值是 **`Base64(帳號 + ":" + Base64(密碼))`**，密碼要先自己 Base64 一次，和一般的 HTTP Basic 不同
+- token 預設 1 天過期，過期後收到 401 會自動重新申請
+- 收到 403（這個 client 沒有權限）、帳密錯誤、換到的 token 仍被拒絕 → run 作廢
+- 直連 world-api 時永遠不會收到 401，所以不會去申請 token
+
+## 常見問題
+
+| 狀況 | 原因與解法 |
+|---|---|
+| 後台網址 404（Whitelabel Error Page） | 網址少了 `ac4`，用 `/dgrv4/ac4/login` |
+| 註冊頁按「測試外部URL」回 500 | world-api 沒開，先 `civsim serve` |
+| `Illegal character in path ... {rid}` | 目標 URL 的路徑參數寫錯。**目標 URL 和 Proxy Path 都要寫 `{p}`**，digiRunner 只會代換 `{p}`（官方文件範例寫 `{id}` 是錯的） |
+| 列表或選擇頁面顯示「尚無資料」 | 很多頁面要先搜尋才會列出來；選群組時搜尋的是**群組代碼**，不是 client 名稱 |
+| 「以 URL 上傳 OpenAPI 文件」按了沒反應 | 不支援，請用第 2 步的匯入檔 |
+| 回應 401 | 沒帶 token 或 token 無效（digiRunner 擋的） |
+| 回應 403 | token 有效，但這條路徑不在這個 client 的群組裡（digiRunner 擋的） |
+| 回應 409、422、404 | 已經到 world-api 了，是 world-api 的規則，例如 run 已經跑完（重開 `civsim serve`） |
+| `civsim govern` 不加 `--base-url` 卻連到 18080 | 舊版 `.env.example` 留下的 `DIGIRUNNER_BASE_URL=http://localhost:18080`，刪掉或改成 31080 |
+| 換 token 失敗、帳密錯誤 | 檢查 `.env` 和後台的帳號是否一字不差；Token 設定是否勾了 Client Credentials |
+| 忘記 client 密碼 | 打開 `.env` 看；或到「安全性 → 密碼管理」設新的，再改 `.env` |
+| VS Code 裡按 Ctrl+C 停不掉 world-api | 按終端機的垃圾桶圖示，或 `Stop-Process -Id (Get-NetTCPConnection -LocalPort 8000 -State Listen).OwningProcess` |
+| 自己寫的 `.ps1` 中文變亂碼、怪錯誤 | Windows PowerShell 5.1 要用**帶 BOM 的 UTF-8** 存檔 |
+
+## world-api 新增或修改路徑時
+
+1. 在 digiRunner 註冊新路徑：「API管理」→「API註冊」，模式選「預設模式（dgrc）」，路徑參數兩邊都用 `{p}`；
+   或在匯入檔複製一筆，改 `apiKey`、`moduleName`、`apiName`、`srcURL`、`enpoint`、`httpMethod`、`urlRID`（有 `{p}` 時為 `"1"`）
+2. 把新路徑加進對應的群組
+3. 更新 `deploy/digirunner/world-api-apis.json`：「API列表」選好路徑後「匯出」，確認 `no_oauth` 都是 `"0"` 再 commit
+
+## 安全注意事項
+
+- `.env` 有 LLM 金鑰和 client 密碼，**不能推上 GitHub**（這個 repo 是公開的）
+- 所有路徑的 No Auth 都要關著，否則任何程式不帶 token 就能呼叫，包括讀天災時間表
+- `civsim-gov` 永遠不能被授權 `frontend-group`
+- digiRunner 和 world-api 都只開放給本機
+- 前端在瀏覽器裡跑，如果要經過 digiRunner，帳密不能寫在前端程式碼裡，做法還在討論
+
+## 參考
+
+- [digiRunner 開源版](https://github.com/TPIsoftwareOSPO/digiRunner-Open-Source)
+- [永久資料庫的 Docker Compose 設定](https://docs.tpi.dev/get-started/installation/docker-compose.md)
+- [API Registry（dgrc 模式、`{p}`）](https://docs.tpi.dev/digirunner-open-source/guide/api-management/api-registry.md)
+- [API Client（TPS、API 配額、Token 設定）](https://docs.tpi.dev/digirunner-open-source/guide/client-management/api-client.md)
+- [Client Credentials Mode（換 token）](https://docs.tpi.dev/digirunner-open-source/api-integration-guide/using-token-for-authentication-and-authorization/client-credentials-mode.md)
