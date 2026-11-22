@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 
 from civsim.agents import NoGovernment
 from civsim.api.server import create_app
-from civsim.gateway.client import HttpWorldClient, RunInvalid, basic_credentials, run_government
+from civsim.gateway.client import ClientCredentials, HttpWorldClient, RunInvalid, basic_credentials, run_government
 from civsim.world import SimulationEngine
 
 RUN = "test-run"
 CLIENT_ID, SECRET = "civsim-gov", "s3cret-pw"
+CREDS = ClientCredentials(CLIENT_ID, SECRET)
 
 
 @pytest.fixture
@@ -73,8 +74,7 @@ class FakeGateway:
 
 
 def gov_client(gw, **kw):
-    kw.setdefault("client_id", CLIENT_ID)
-    kw.setdefault("client_secret", SECRET)
+    kw.setdefault("credentials", CREDS)
     return HttpWorldClient(http=gw.http(), backoff=0, **kw)
 
 
@@ -105,7 +105,7 @@ def test_refreshes_expired_token_mid_run(server, engine):
 def test_wrong_secret_invalidates_run(server, engine):
     gw = FakeGateway(server)
     with pytest.raises(RunInvalid, match="帳密"):
-        gov_client(gw, client_secret="wrong")
+        gov_client(gw, credentials=ClientCredentials(CLIENT_ID, "wrong"))
     assert gw.issued == 0 and engine.world.tick == 0
 
 
@@ -131,11 +131,42 @@ def test_errors_never_contain_secret_or_token(server):
     c.runs()  # 先換到 token
     with pytest.raises(RunInvalid) as e:
         c.observe()
-    assert SECRET not in str(e.value) and c.token not in str(e.value)
+    assert SECRET not in str(e.value) and c._token not in str(e.value)
 
 
 def test_direct_to_world_api_never_requests_token(server, engine):
     """直連 world-api（沒有 digiRunner）時不會收到 401，也就不會去申請 token。"""
-    c = HttpWorldClient(http=server, backoff=0, client_id=CLIENT_ID, client_secret=SECRET)
+    c = HttpWorldClient(http=server, backoff=0, credentials=CREDS)
     run_government(c, NoGovernment())
     assert c.token_requests == 0 and engine.world.tick == engine.config.total_ticks
+
+
+def token_endpoint_returns(server, response):
+    """digiRunner 的 /oauth/token 回傳指定的內容；其他路徑沒帶 token 一律 401。"""
+    def handle(request):
+        if request.url.path == "/oauth/token":
+            return response
+        return httpx.Response(401, json={"error": "Unauthorized"})
+    return httpx.Client(transport=httpx.MockTransport(handle), base_url="http://digirunner")
+
+
+def test_token_response_not_json_invalidates_run(server):
+    """digiRunner 回 200 但內容是 HTML 錯誤頁：要變成 RunInvalid，不是 JSON 解析錯誤。"""
+    http = token_endpoint_returns(server, httpx.Response(200, text="<html>Error</html>"))
+    with pytest.raises(RunInvalid, match="不是 JSON"):
+        HttpWorldClient(http=http, backoff=0, credentials=CREDS)
+
+
+def test_token_response_without_access_token_invalidates_run(server):
+    http = token_endpoint_returns(server, httpx.Response(200, json=["unexpected"]))
+    with pytest.raises(RunInvalid, match="access_token"):
+        HttpWorldClient(http=http, backoff=0, credentials=CREDS)
+
+
+def test_credentials_repr_hides_secret():
+    assert SECRET not in repr(CREDS) and CLIENT_ID in repr(CREDS)
+
+
+def test_summary_counts_token_requests(server):
+    summary = run_government(gov_client(FakeGateway(server)), NoGovernment())
+    assert summary["token_requests"] == 1
