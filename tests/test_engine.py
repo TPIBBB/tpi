@@ -1,9 +1,10 @@
 import json
+import re
 from dataclasses import replace
 
 import pytest
 
-from civsim.agents import LLMGovernment
+from civsim.agents import LLMGovernment, NoGovernment
 from civsim.agents.llm import ScriptedClient
 from civsim.analysis.goals import evaluate_disaster, first_sustained
 from civsim.config import DisasterConfig, SocialRuleConfig
@@ -112,10 +113,22 @@ def test_reset_restores_initial_world_but_keeps_tick(small_config):
     assert engine.world.government == engine.initial_world.government
 
 
-def scripted_government(decisions: list[dict], memory: str | None = "# 記憶 v1"):
+def is_reflection(user: str) -> bool:
+    return user.startswith("## 這次天災")
+
+
+def lessons_reply(user: str, lesson: str = "記憶 v1") -> str:
+    """照抄報告的結果，教訓帶上第幾次天災（每次都不一樣，才不會被當成照抄舊版而重問）。"""
+    disaster = re.search(r"第 (\d+) 次", user).group(1)
+    result = "失敗" if "- 結果：失敗" in user else "成功"
+    return json.dumps({"result": result, "analysis": "測試", "worked": [], "failed": [],
+                       "try_next": [f"{lesson}（第{disaster}次）"]}, ensure_ascii=False)
+
+
+def scripted_government(decisions: list[dict], lesson: str = "記憶 v1"):
     def respond(system, user):
-        if "current_memory" in user:
-            return json.dumps({"memory": memory})
+        if is_reflection(user):
+            return lessons_reply(user, lesson)
         return json.dumps({"actions": decisions})
     return LLMGovernment(ScriptedClient(respond))
 
@@ -145,7 +158,9 @@ def test_reflection_updates_memory_and_report(small_config):
     engine = SimulationEngine(small_config, government=scripted_government([]))
     engine.run()
     assert len(engine.reports) == small_config.disasters.count
-    assert engine.memory == "# 記憶 v1" and len(engine.memory_versions) == 3
+    assert len(engine.memory_versions) == 3
+    assert "記憶 v1（第2次）" in engine.memory  # LLM 寫的教訓
+    assert "- 第 1 次（乾旱）" in engine.memory and "- 第 2 次（乾旱）" in engine.memory  # 程式寫的天災紀錄
     assert engine.reports[1]["memory_version"] == 1
 
 
@@ -158,9 +173,22 @@ def test_no_memory_group_never_reflects(small_config):
 
 
 def test_too_long_memory_is_rejected(small_config):
-    engine = SimulationEngine(small_config, government=scripted_government([], memory="x" * 10_000))
+    class TooLong(NoGovernment):  # LLMGovernment 自己會控制長度，所以直接回傳超長的記憶
+        def reflect(self, report, memory):
+            return "x" * 10_000
+
+    engine = SimulationEngine(small_config, government=TooLong())
     engine.run()
     assert engine.memory_versions == [""]
+
+
+def test_llm_memory_stays_within_limit(small_config):
+    cfg = replace(small_config, government=replace(small_config.government, memory_max_chars=300))
+    gov = scripted_government([], lesson="很長的教訓" * 100)
+    gov.memory_max_chars = 300  # build_government 會從 config 傳進來；這裡直接建立所以手動設定
+    engine = SimulationEngine(cfg, government=gov)
+    engine.run()
+    assert len(engine.memory_versions) == 3 and all(len(m) <= 300 for m in engine.memory_versions)
 
 
 def test_api_mode_accepts_external_decisions(small_config):
@@ -224,7 +252,7 @@ def test_citizen_can_harvest_then_sell_the_same_day(small_config):
 
 def test_failed_reflection_is_logged_separately(small_config):
     def respond(system, user):
-        if "current_memory" in user:
+        if is_reflection(user):
             raise TimeoutError("連線逾時")
         return json.dumps({"actions": []})
 
@@ -244,3 +272,45 @@ def test_llm_calls_are_written_to_llm_calls_jsonl(small_config, tmp_path):
     assert len(rows) == len(gov.calls) == small_config.total_ticks + small_config.disasters.count
     assert {r["trigger"] for r in rows} == {"decide", "reflect"}
     assert all(r["prompt"] and r["response"] for r in rows)
+
+
+def test_price_history_covers_current_cycle_only(small_config):
+    engine = SimulationEngine(small_config, government=None)
+    for _ in range(5):
+        engine.step()
+    engine.begin_tick()
+    obs = engine.government_observation()
+    assert [h["tick"] for h in obs.price_history] == [m["tick"] for m in engine.cycle_history]
+    assert len(obs.price_history) == 5
+    assert obs.price_history[-1]["price"] == pytest.approx(obs.prices["food"], abs=1e-4)
+    assert set(obs.price_history[0]) == {"tick", "price"}  # 不給均衡區間或 in_band
+
+    first = engine.schedule[0]
+    while engine.world.tick <= first.window_end:
+        engine.step()
+    engine.begin_tick()
+    assert engine.government_observation().price_history == []  # 重置後清空，不帶到下一次天災
+
+
+def test_price_history_days_limits_length(small_config):
+    small_config.government.price_history_days = 3
+    engine = SimulationEngine(small_config, government=None)
+    for _ in range(5):
+        engine.step()
+    engine.begin_tick()
+    assert len(engine.government_observation().price_history) == 3
+
+
+def test_replayed_decisions_are_marked_in_records(small_config):
+    """on_change 跳過 LLM 的日子照常結算，但決策紀錄與事件要標記 replayed。"""
+    gov = LLMGovernment(ScriptedClient(lambda s, u: json.dumps(
+        {"actions": [{"type": "import_food", "params": {"qty": 1}}]})),
+        call_policy="on_change", price_tolerance=10.0)  # 放寬容忍度，確保會跳過
+    engine = SimulationEngine(small_config, government=gov)
+    for _ in range(3):
+        engine.step()
+    flags = [r["replayed"] for r in engine.cycle_decisions]
+    assert flags[0] is False and any(flags[1:])  # 第一天一定呼叫 LLM，之後狀況沒變就重播
+    used = [c.used_llm for c in gov.calls]
+    assert flags == [not u for u in used]  # 紀錄的標記和 LLM 呼叫紀錄一致
+    assert all(r["accepted"] for r in engine.cycle_decisions)  # 重播的決策照常結算

@@ -62,6 +62,7 @@ class ActionIn(BaseModel):
     type: str = Field(description="決策類型，例如 release_reserve。未知的類型會被記為拒絕，不是 HTTP 錯誤")
     params: dict[str, Any] = Field(default_factory=dict, description="決策參數，合不合法由引擎檢查")
     reason: str = Field("", description="政府自述理由，只做紀錄")
+    replayed: bool = Field(False, description="true = LLM 當天沒被呼叫，沿用上次的決策（只做紀錄，結算方式相同）")
 
 
 class DecisionsIn(BaseModel):
@@ -89,7 +90,8 @@ def _decision_records(events: list[Event]) -> list[dict]:
             p = e.payload
             records.append({
                 "tick": e.tick, "type": e.kind[len("gov:"):], "params": p.get("params", {}), "reason": e.message,
-                "accepted": True, "result": {k: v for k, v in p.items() if k != "params"},
+                "replayed": p.get("replayed", False),
+                "accepted": True, "result": {k: v for k, v in p.items() if k not in ("params", "replayed")},
             })
     return records
 
@@ -143,10 +145,11 @@ def create_government_router(engine, run_id: str, lock: threading.Lock, event_lo
             decided, unknown = [], []
             for a in body.actions:
                 if a.type in known:
-                    decided.append(GovernmentDecision(GovernmentActionType(a.type), a.params, a.reason))
+                    decided.append(GovernmentDecision(GovernmentActionType(a.type), a.params, a.reason, a.replayed))
                 else:
                     # 和本機模式的 parse_decisions 一樣：未知類型不交給引擎，所以隔天的 recent_decisions 看不到
                     unknown.append({"tick": tick, "type": a.type, "params": a.params, "reason": a.reason,
+                                    "replayed": a.replayed,
                                     "accepted": False, "rejected_reason": f"未知的決策類型 {a.type!r}"})
 
             events = engine.step(decided)

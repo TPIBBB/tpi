@@ -311,3 +311,39 @@ def load_dotenv(path: str | Path = ".env") -> None:
         key, value = key.strip(), value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+# ---- 正式實驗前的設定檢查 ----
+def llm_settings() -> dict[str, Any]:
+    """目前環境變數裡的 LLM 設定（不含 API key），寫進每個 run 的 meta.json，之後才查得到結果是哪個模型跑的。"""
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    model = os.getenv("LLM_MODEL", "").strip()
+    seed = os.getenv("LLM_SEED", "").strip()
+    return {
+        "provider": provider or None,
+        "model": model or (DEFAULT_GEMINI_MODEL if provider == "gemini" else None),
+        "model_from_env": bool(model),  # False = 用程式裡的預設模型
+        "base_url": os.getenv("LLM_BASE_URL", "").strip() or None,
+        "temperature": float(os.getenv("LLM_TEMPERATURE", "0") or 0),
+        "seed": int(seed) if seed.lstrip("-").isdigit() else None,
+    }
+
+
+def unlocked_settings(settings: dict[str, Any] | None = None) -> list[str]:
+    """正式實驗前要鎖定的設定，還沒鎖定的回傳說明；空清單表示都鎖定了。
+
+    模型、temperature、seed 沒有固定的話，同一組條件重跑會得到不同結果，A、C 組也不能比較。
+    """
+    s = settings if settings is not None else llm_settings()
+    problems = []
+    if not s["provider"]:
+        problems.append("沒有設定 LLM_PROVIDER")
+    if not s["model_from_env"]:
+        problems.append(f"沒有設定 LLM_MODEL，正在用程式的預設模型 {s['model']}；預設值改了結果就會變，請明確寫在 .env")
+    elif "latest" in (s["model"] or "").lower():
+        problems.append(f"LLM_MODEL={s['model']} 是會自動更新的別名，請改成固定版本")
+    if s["temperature"] != 0:
+        problems.append(f"LLM_TEMPERATURE={s['temperature']}，正式實驗建議用 0")
+    if s["seed"] is None:
+        problems.append("沒有設定 LLM_SEED（整數），相同輸入比較難得到相同回應")
+    return problems

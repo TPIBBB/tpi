@@ -3,9 +3,8 @@
 研究「AI 政府面對天災時會如何決策」：觀察政府的決策，以及每次天災後的評估期內，價格能否恢復到市場均衡價格、
 經歷多次天災後這個結果如何變化。本文件記錄已經定案的專案邊界；還沒定的內容見 README 的「待討論」。
 
-> 11/10 更新：引擎已改成新方向（舊的資訊權限系統已移除），社會規則的部分以 [society.md](society.md) 為準。
-> 和本文件不同的地方：不提供天災預報（沒有 `publish_forecast`、預警時間）、政府每天都能決策、
-> 均衡區間用校準期計算、違規處理有 enforce／record／off 三種模式。政府經 digiRunner 的 HTTP 路徑仍待 API 組實作。
+> 11/20 更新：依 11/09 會議與目前的程式更新（不提供天災預報、政府每天都能決策、均衡區間用校準期計算、
+> 政府的 HTTP 路徑已實作）。社會、市場與平民的細節以 [society.md](society.md) 為準，HTTP 格式以 [api.md](api.md) 為準。
 
 ## 核心觀念
 
@@ -33,30 +32,51 @@
 
 | 角色 | 控制方式 | 能看到 |
 |---|---|---|
-| 政府 | LLM（`GovernmentController`），供應商可替換，正式實驗前鎖定模型 ID | 暫定：價格、自己的預算與儲備、天災**預報**（第一版不設誤差）、社會規則、記憶、近期決策與被拒絕的理由（完整範圍待討論） |
-| 平民 | rule-based（職業、階級待定） | 價格、自己的狀態；政府發布預報後才看得到預報 |
+| 政府 | LLM（`agents/government.py` 的 `LLMGovernment`），供應商可替換（Gemini、Modal／Ollama 等 OpenAI 相容 API），正式實驗前鎖定模型 ID | 見下方「政府看得到什麼」 |
+| 平民 | rule-based（`agents/rule_based.py`，規格見 `agents/citizen_skill.md`），不使用 LLM | 昨天的成交價、習慣價格、自己的狀態、目前的價格上限 |
 
 政府和平民的行動分開定義：平民用 `models.ActionType`，政府用 `GovernmentDecision` / `GovernmentActionType`。
 
+**政府看得到什麼**（11/09 會議，欄位見 `world/government.py` 的 `GovernmentObservation`）：
+
+| 看得到 | 看不到 |
+|---|---|
+| 昨天的成交價、自己的預算與儲備、人口、這次週期的死亡人數、昨天挨餓的人數 | 平民各自的存糧與存款 |
+| 平民的 id 與類型、目前的價格上限 | 天災時間表、天災預報 |
+| 社會規則（B 組看不到）、記憶（A 組沒有）、這次週期最近 20 筆決策結果與被拒絕的理由 | 均衡價格區間（後台判定用） |
+| 這次週期（上次重置以來）每天的成交價 `price_history` | 上一次以前的週期的價格（只能靠記憶） |
+
+**為什麼給價格歷史、不給均衡區間**（11/20 決定）：均衡區間是後台的評分標準，給了等於先看答案。
+價格歷史是政府自己親眼看過的資訊，但 LLM 每次呼叫都不記得上一次，不給的話天災那天只看得到一個數字，
+不知道它比平常高還是低；C 組卻能在記憶裡寫下「正常糧價約 5」補上這個資訊。
+這樣 C 組贏了也分不清是學到策略，還是記憶只被當成價格筆記本。給了價格歷史，A、C 組在同一次天災內資訊對等，
+兩組的差距只會來自跨天災累積的經驗，比較容易判斷政府有沒有從經驗中學習。
+
+**副作用：政府推得出「這個週期的第幾天」**（11/20 決定接受）：`price_history` 的長度就是上次重置後過了幾天。
+C 組可能在記憶裡寫下「重置後約第 20 天會有天災」並提前準備；穩定期長度隨機（`stable_days ± stable_jitter`）可以降低、但無法消除這個效果。
+「記住天災大概何時來」也算從經驗中學習，所以接受；分析時要從記憶內容區分政府學到的是**時機**還是**策略**，並在報告中說明。
+
 平民的設定：
 
-- **特性**：有無買賣、有無產出，共 4 種；有產出的平民產量隨機。
-- **persona**：會不會遵守政府政策、sloth、greed、risk tolerance、gluttony。
+- **特性**：有無買賣、有無產出，共 4 種（農商、自耕農、打工族、依賴者）；有產出的平民產量隨機。
+- **persona**：sloth、greed、risk_tolerance、gluttony，以及是否服從政府（固定 30% 不服從）。
 
 ## 一個回合
 
 ```
-天災            world/disasters.py   依時間表更新預報（政府可見）與真實減產
-政府決策        需要決策的回合才呼叫（見下）
+天災            world/disasters.py   依時間表觸發減產（沒有預報，政府和平民都只能從收成與價格察覺）
+政府決策        每天都呼叫
                 agents/government.py 提出 → world/social_rules.py 檢查規則 → world/government.py 驗證與結算
-平民決策        依價格、狀態與已發布的預報行動；對政府行動有對應的反應規則
-結算與 upkeep   現有流程
+平民決策        依價格與自己的狀態行動；對政府政策的反應見 agents/citizen_skill.md
+結算            生產 → 集合競價成交 → 每人吃 1 單位糧食（見 society.md）
 記錄            事件、狀態、指標
 評估與反思      某次天災的評估期結束時：analysis/goals.py 產生報告 → 政府提出新版記憶 → 引擎檢查後保存
                 不論價格是否恢復，引擎都把社會調回同一個均衡狀態，政府記憶會保留
 ```
 
-- **決策頻率**：從預報開始到評估期結束，每個 tick 都決策；平時是否決策待討論（若可以，每 N 個 tick 一次）。
+- **決策頻率**：穩定期、天災與評估期每天都決策（政府不知道天災何時開始，平時也要能行動）。
+  為了省 LLM 呼叫，`government.call_policy: on_change` 會在狀況和上次呼叫時差不多時沿用上次的決策、不呼叫 LLM；
+  上次決策被拒絕、記憶剛更新，或已經連續 `max_skip_days` 天沒呼叫時，一定會呼叫。
 - **結算順序**：政府先於平民結算；平民行動的順序每回合隨機打亂。
 - **一天一個決策**：政府一天只能做一個決策（`max_decisions_per_day`），多送的會被拒絕並記錄理由。
 - **平民一天跑一輪**：依身分生產一次（收成／打工）加上一張買賣單，先生產再下單；多送的動作會被拒絕並記錄。
@@ -70,16 +90,15 @@
 | 穩定 | `release_reserve`、`buy_reserve`、`import_food`、`price_cap`、`distribute_food`、`cash_transfer` |
 | 財政 | `collect_tax`、`issue_currency` |
 | 強制 | `seize_food`、`execute_citizen` |
-| 資訊 | `publish_forecast`：把預報公開給平民（平民會沿用現有的囤積反應） |
+| 其他 | `idle`：今天不行動 |
 
-名稱與參數以 `agents/government.py` 的 `DECISION_DOCS` 為準，`publish_forecast` 尚未加入；
-實際可用的行動由模擬引擎組的 `GovernmentActionType` 決定。
+給 LLM 看的參數說明在 `agents/government.py` 的 `DECISION_DOCS`；實際可用的行動與參數檢查以模擬引擎組的
+`GovernmentActionType` 與 `world/government.py` 為準。引擎新增行動但 `DECISION_DOCS` 還沒補說明時，prompt 只會列出名稱。
 
 - 刻意納入可能違反社會邏輯的行動，才觀察得到違規。
-- 每個行動至少定義一條平民的反應規則（例如被徵收後下回合工作量下降），壞決策才有代價；
-  代價只存在於該次天災內，不會帶到下一次。
-  平民不遵守政策時的具體行為待討論。
-- 發行貨幣會影響價格：做市商的價格乘上「目前貨幣量 / 初始貨幣量」。
+- 平民的反應（11/12 定案）：只有價格上限需要平民選擇，不服從的農商在價格上限期間不賣糧；
+  其他政策由引擎直接執行，平民不做反應。壞決策的代價只存在於該次天災內，不會帶到下一次。
+- 發行貨幣會影響價格：習慣價格（平民報價的參考）隨貨幣量上升。
 
 ## 社會規則
 
@@ -89,33 +108,51 @@
 
 ## 記憶
 
-- 政府的記憶是一份 Markdown。每次天災評估期結束都會呼叫 `reflect`；回傳 `None` 表示不更新。
-- 引擎只檢查長度上限與格式，不審查內容；每個版本都保存。
-- 記憶**不跨 run**：每個 run 從同一份初始記憶開始（版本記錄在 manifest）。
-- 反思報告只放實際觀測值：評估期內的價格、是否恢復到均衡價格、這次天災中自己的決策和被拒絕的決策。
-  其他欄位（例如挨餓與死亡人數）隨「政府看得到什麼」一起決定。
+- 政府的記憶是一份 Markdown。有記憶的組別在每次天災評估期結束都會呼叫 `reflect`；回傳 `None` 表示不更新。
+- 引擎只檢查長度上限（`government.memory_max_chars`，預設 4000 字元）與格式，不審查內容；每個版本都保存。
+  超過上限的記憶整份拒絕、沿用舊版。反思的 prompt 會告訴 LLM 這個上限與目前記憶的字數，
+  `build_government` 會把 config 的上限傳給 `LLMGovernment`，兩邊要一致。
+- 記憶**不跨 run**：每個 run 從同一份初始記憶（`government.initial_memory`）開始。
+- 反思報告（`analysis/goals.py` 的 `evaluate_disaster`）交給 LLM 前會拿掉均衡區間（`band`，見 `HIDDEN_REPORT_FIELDS`），
+  只放實際觀測值：評估期內每天的價格、
+  是否成功、第幾天回到區間、價格被上限壓住的天數、最高價、挨餓人天數、死亡人數，以及這次週期自己的所有決策與被拒絕的理由。
+- 記憶格式（gov-v6 起，`agents/government.py`）：試跑時 Qwen2.5-7B 把失敗的天災寫成「災害未發生」、
+  第二次反思把舊記憶原封不動抄回來，所以改成程式和 LLM 分工：
+  - **天災紀錄**：每次天災的結果（成功與否、挨餓人天、最高價、被上限壓住的天數、各類決策次數）由程式寫一行，LLM 不能改。
+    紀錄最多佔記憶的一半，超過就刪最舊的。
+  - **教訓**：LLM 回傳 `result`（照抄成功／失敗）、`analysis`、`worked` / `failed` / `try_next` 三個清單，由程式組成 Markdown。
+  - 反思報告寫成先講結論的中文摘要，決策依類型統計，不逐筆列出。
+  - 回答不合格（`result` 和報告不符、超過字數、格式錯誤、和舊教訓一模一樣、三個清單都空）就帶著問題重問一次
+    （`trigger = "reflect-retry"`）。還是不合格時：嚴重問題（讀錯結果、太長、格式錯誤）保留舊教訓，
+    輕微問題（照抄、空白）照樣採用；兩種情況這次的天災紀錄都會寫進去。連不上 LLM 時回傳 `None`，引擎記成反思失敗。
+- 決策 prompt（gov-v6 起）另外附上程式從觀察算好的趨勢：漲跌幅、連續上漲／下跌天數、價格是否被上限壓住、
+  挨餓人數的變化，以及近期決策（連續相同的合併）之後價格與挨餓人數的變化。只做算術，不加入政府看不到的資訊。
+  觀察裡只有今天的挨餓人數，`LLMGovernment` 自己記每天的人數，價格歷史變短（重置）時清空。
+  可用行動依作用分類（增加糧食／幫平民買得起／壓住價格／增加政府資源），LLM 要先寫 `situation` 判斷現況再決定。
 
 ## 天災時間表
 
 ```
-[穩定期][預報][天災][評估期] → 調回同一個均衡狀態 → 下一次天災（從穩定期開始）
+[穩定期][天災][評估期] → 調回同一個均衡狀態 → 下一次天災（從穩定期開始）
 ```
 
-- 時間表與強度由 config 決定，與政府決策無關，所有條件和 seed 都遇到相同的天災；seed 只影響平民等其他隨機部分。
+- 不提供天災預報（11/09 會議）：有預報又能提前決策的話，政府一定先囤糧，會讓數據失真。政府只能憑記憶判斷。
+- 時間表與強度由 config 決定（`schedule_seed` 和平民的 `seed` 分開），與政府決策無關，所有條件都遇到相同的天災。
 - 每個 run 經歷多次天災，評估期不重疊。
-- **穩定期**是社會沒有經歷天災時的正常社會。每次評估期結束，不論價格是否恢復，引擎都把社會調回同一個均衡狀態，
-  政府記憶會保留，近期決策與被拒絕的理由會清空；這個狀態從哪裡取得、人口與政府預算儲備是否調回待討論。
-- 每次天災的強度、預警時間（預報開始到天災開始的 tick 數）與評估期長度都相同，結果才能互相比較。
-- 各段長度放在 config，總 tick 數由此推算。
+- **穩定期**是社會沒有經歷天災時的正常社會。長度在 `stable_days ± stable_jitter` 內隨機，政府才學不到天災的固定時間。
+- 每次評估期結束，不論價格是否恢復，引擎都把社會調回初始世界：人口、平民庫存、政府預算與儲備、市場全部重置，
+  近期決策與被拒絕的理由清空，只有政府記憶保留。
+- 每次天災的強度（`food_multiplier`）、天災天數與評估期長度都相同，結果才能互相比較。
 
 ## 目標判定與實驗設計
 
 **判定（每次天災，`analysis/goals.py`）**
 
 - 天災結束後的評估期長度固定，觀察這段期間內價格能否恢復到市場均衡價格；A、C 組比較的就是這個結果。
-- 政府可以使用 `price_cap`，但價格被上限壓住時不算成功。
-- 死亡人數不影響成功判定，只記成輔助指標。
-- 成功標準待討論：用固定數字，或和穩定期（社會沒有經歷天災時的正常社會）的價格比較。
+- 均衡區間：校準期（沒有政府、沒有天災）每天成交價的平均 ± k 個標準差（`equilibrium.k`，見 society.md）。
+- 成功（11/09 會議）：評估期內回到區間後，要一直維持在區間內直到評估期結束；中途跑出區間就算失敗。
+- 政府可以使用 `price_cap`，但價格被上限壓住的那天不算在區間內。
+- 死亡與挨餓人數不影響成功判定，只記成輔助指標。
 
 **比較（`experiments/disaster_runner.py`）**
 
@@ -149,8 +186,9 @@ world-api (api/server.py + api/government.py) ── 模擬引擎；平民在這
 ```
 
 - **只有政府走 API**，平民在 world-api 內部計算。
-- **world-api 自己跑回合迴圈**，輪到政府決策時暫停，等 `POST /government/decisions` 送來才繼續；
-  政府 client 輪詢 `GET /government/observation`。不需要政府決策的回合由 world-api 直接跑完。
+- **world-api 自己跑回合迴圈**，每天暫停等政府 `POST /government/decisions` 送來才繼續；
+  政府 client（`gateway/client.py`，用 `python -m civsim govern` 啟動）輪詢 `GET /government/observation`。
+  有記憶的組別在評估期結束時會停在 `awaiting_reflection`，等政府送來新版記憶（見 api.md）。
 - **基礎設施錯誤**（限流、逾時、驗證失敗）有上限地重試；仍然失敗就把整個 run 標記為無效，
   不會默默變成 IDLE。
 - 第一版一次只跑一個 run，但路徑預留 `run_id`（`/runs/{run_id}/government/...`），之後平行執行不必改路由。
@@ -166,36 +204,54 @@ world-api (api/server.py + api/government.py) ── 模擬引擎；平民在這
 - 天災報告、記憶版本、LLM 呼叫（prompt、回應、模型版本）都帶 `run_id`。
 - 政府 client 的請求在 header 帶 `run_id`，讓 digiRunner 的存取紀錄能和模擬紀錄對應。
 - 先寫 JSONL（`JsonlRecorder`），資料庫組另寫匯入 `db/schema.sql` 的流程；實驗執行不依賴資料庫服務。
+- 目前每個 run 的 `meta.json` 有：完整的 config、git commit 與有沒有未 commit 的修改（`git.dirty`），
+  用 LLM 政府時再加上 `llm`：供應商、模型、temperature、seed、prompt 版本，以及還沒鎖定的設定（`unlocked`）。
+  不含 API key。
+- **重播的決策**：`call_policy: on_change` 跳過 LLM 的日子會重送上次的決策，結算方式完全相同，但決策紀錄
+  （`recent_decisions`、天災報告的 `decisions`、`gov:*` 與 `rule:violation` 事件）會標 `replayed: true`。
+  分析政府做了什麼、B 組人工判斷「亂搞」時，只看 LLM 親自做的決策，重播的另外計算。
+
+### 正式實驗前的檢查清單
+
+1. **鎖定 LLM 設定**：`.env` 明確寫出 `LLM_MODEL`（固定版本，不要用 `latest` 這類會自動更新的別名）、
+   `LLM_TEMPERATURE=0`、`LLM_SEED`（整數）。`run`、`experiment`、`govern` 用 LLM 政府時會提醒還沒鎖定的設定；
+   正式實驗加上 `--strict`，沒鎖定就不執行。
+2. **改 prompt 就升版本**：改了 `agents/government.py` 的任何 prompt，就把 `GOV_PROMPT_VERSION` 加 1。
+   `tests/test_prompt_version.py` 會檢查 prompt 內容的指紋，忘記升版本時測試會失敗，並印出要登記的新指紋。
+3. **先 commit 再跑**：`meta.json` 的 `git.dirty` 是 `true` 表示有未 commit 的修改，那次的結果無法重現。
+4. **跑完看統計**：`python -m civsim llm-stats runs/<組別>/seed<n> [...] [--csv 輸出.csv]` 會列出 LLM 呼叫與失敗次數、
+   token 用量、每種決策的次數（LLM 親自做的／重播的、穩定期／天災／評估期）、被拒絕的理由、違反的社會規則、
+   每次天災的結果與 LLM 用了哪些決策。B 組的結果直接交給社會規則負責人訂規則。
 
 ## 模組之間的介面
 
 | 介面 | 模組 | 用途 |
 |---|---|---|
-| `build_schedule(seed, ticks)` | `world/disasters.py` | 建立天災時間表，與政府決策無關 |
-| `begin_tick_events(world, schedule)` | `world/disasters.py` | 回合開始時更新預報、觸發天災 |
+| `build_schedule(config)` | `world/disasters.py` | 建立天災時間表，與政府決策無關 |
+| `begin_tick_events(world, schedule)` | `world/disasters.py` | 回合開始時觸發天災 |
 | `GovernmentController.decide(obs)` | `agents/government.py` | 根據 `GovernmentObservation` 提出 `GovernmentDecision` |
 | `GovernmentController.reflect(report, memory)` | `agents/government.py` | 回傳新版記憶，不修改時回傳 `None` |
 | `find_violations(decision, rules)` | `world/social_rules.py` | 回傳決策違反的規則 |
-| `validate(world, decision)` | `world/government.py` | 合法時回傳 `None`，否則回傳拒絕原因 |
-| `settle(world, decision)` | `world/government.py` | 執行已驗證的決策並回傳事件紀錄 |
-| `evaluate_disaster(disaster, history, events)` | `analysis/goals.py` | 產生一次天災的報告 |
+| `validate(world, decision, config)` | `world/government.py` | 合法時回傳 `None`，否則回傳拒絕原因 |
+| `settle(world, decision, config)` | `world/government.py` | 執行已驗證的決策並回傳事件紀錄 |
+| `evaluate_disaster(disaster, history, band, decisions)` | `analysis/goals.py` | 產生一次天災的報告 |
 | `first_sustained(reports)` | `analysis/goals.py` | 找出從第幾次天災開始，之後每一次都成功（是否保留依實驗方式決定） |
 | `ResearchRecorder` | `storage/research_records.py` | 保存 manifest、天災報告、記憶版本與 LLM 呼叫 |
-| `run_conditions(configs, repeats, out_root)` | `experiments/disaster_runner.py` | 每組條件跑多個 seed，輸出每次天災的結果 |
+| `run_conditions(configs, repeats, out_root)` | `experiments/disaster_runner.py` | 每組條件跑多個 seed，輸出每次天災的結果（尚未實作，目前用 `experiments/runner.py` 的 `run_batch`） |
 
-## 預計的 HTTP 路徑
+## HTTP 路徑
 
-都列在 `api/government.py`，目前尚未實作。政府的路徑預留 `run_id`（見上面的執行模式）。
+政府的路徑在 `api/government.py`，`/world/*` 在 `api/server.py`。格式以 [api.md](api.md) 為準。
 
-| 路徑 | 內容 |
-|---|---|
-| `GET /runs/{run_id}/government/observation` | 政府本回合看得到的內容 |
-| `POST /runs/{run_id}/government/decisions` | 提交政府決策 |
-| `GET /runs/{run_id}/government/reflections` | 等待反思的天災報告與目前的記憶 |
-| `POST /runs/{run_id}/government/memory` | 提交新版記憶 |
-| `GET /world/disasters` | 天災時間表與報告 |
-| `GET /world/memory` | 政府記憶的所有版本 |
-| `GET /world/rules` | 社會規則 |
+| 路徑 | 內容 | 狀態 |
+|---|---|---|
+| `GET /runs/{run_id}/government/observation` | 政府本回合看得到的內容 | ✅ |
+| `POST /runs/{run_id}/government/decisions` | 提交政府決策 | ✅ |
+| `GET /runs/{run_id}/government/reflections` | 等待反思的天災報告與目前的記憶 | ✅ |
+| `POST /runs/{run_id}/government/memory` | 提交新版記憶 | ✅ |
+| `GET /world/disasters` | 天災時間表與報告 | ✅ |
+| `GET /world/memory` | 政府記憶的所有版本 | 之後需要再做 |
+| `GET /world/rules` | 社會規則 | 之後需要再做 |
 
 `/runs/*/government/*` 只有政府的身分能呼叫；`/world/*` 的欄位由前端組確認。
 
@@ -212,19 +268,11 @@ world-api (api/server.py + api/government.py) ── 模擬引擎；平民在這
 | `storage/research_records.py` | 資料庫組 | manifest、天災報告、記憶版本、LLM 呼叫的紀錄 |
 | `api/government.py` | digiRunner 整合組、前端組 | 政府與研究資料的 HTTP 路徑 |
 
-## 接線
+## 尚未完成
 
-把骨架接進引擎、調整現有程式時會改到共用介面，請先在群組討論分工與順序：
+原本「接線」清單裡的項目（移除舊的資訊權限、回合流程、調回均衡狀態、掛上政府 router、更新研究目標）都已完成；
+預報因為 11/09 會議決定不提供而取消。目前還沒做的：
 
-- **移除舊的資訊權限**：`policy/`、`models.py` 的權限行動、`world/engine.py` 與 `world/rules.py` 的權限檢查、
-  `agents/rule_based.py` 的申請與授權邏輯、`agents/llm.py`、`analysis/metrics.py` 的權限指標、
-  `gateway/`、`api/server.py`，以及相關測試與 `configs/`。前端的 `/world/state` 會少掉權限欄位，需同步通知前端組。
-- **預報**：平民改為預設看不到預報，只有政府發布後才看得到。
-- **市場**：做市商的價格加入貨幣量倍率。
-- **`world/engine.py`**：加入上面的回合流程，並支援 API 模式下等待政府決策。
-- **`world/events.py`**：`generate_events` 由 `begin_tick_events` 取代。
-- **`models.py`**：政府決策維持獨立的 `GovernmentDecision`，不併入 `ActionType`。
-- **`config.py`**：新增天災、政府、社會規則、判定標準、決策頻率、模型的設定。
-- **`api/server.py`**：掛上 `api/government.py` 的 router。
-- **調回均衡狀態**：引擎要在每次評估期結束時，把社會調回同一個均衡狀態（保留政府記憶，清空近期決策與被拒絕的理由）並記錄事件。
-- **研究目標**：`analysis/goals.py` 與 `agents/government.py` 的 prompt 仍寫「沒有飢荒」，要改成新的目標。
+- **`experiments/disaster_runner.py`** 的 `run_conditions`（分析組）。
+- **manifest**：`meta.json` 已經有 config、git commit、模型與 prompt 版本；還缺 `run_id`、config 雜湊值、規則集版本。
+- **`/world/memory`、`/world/rules`**：前端需要時再做。
