@@ -1,6 +1,7 @@
 """引擎的遠端反思模式（API 用）必須和本機模式跑出完全一樣的結果。"""
 
 import json
+import re
 
 import pytest
 
@@ -27,25 +28,27 @@ class ListRecorder:
         pass
 
 
-def memory_for(report):
-    return f"# 天災 {report['disaster_id']} 的經驗"
+def respond(system, user):
+    if user.startswith("## 這次天災"):
+        disaster = re.search(r"第 (\d+) 次", user).group(1)
+        result = "失敗" if "- 結果：失敗" in user else "成功"
+        return json.dumps({"result": result, "worked": [], "failed": [],
+                           "try_next": [f"天災 {disaster} 的經驗"]}, ensure_ascii=False)
+    return json.dumps({"actions": [{"type": "import_food", "params": {"qty": 2}}]})
 
 
 def local_engine(config):
-    def respond(system, user):
-        if "current_memory" in user:
-            return json.dumps({"memory": memory_for(json.loads(user)["report"])})
-        return json.dumps({"actions": [{"type": "import_food", "params": {"qty": 2}}]})
-
     return SimulationEngine(config, government=LLMGovernment(ScriptedClient(respond)), recorder=ListRecorder())
 
 
 def remote_engine(config):
+    """和 gateway/client.py 一樣：遠端拿到報告後，用同一種政府反思，再把記憶送回引擎。"""
+    gov = LLMGovernment(ScriptedClient(respond))
     engine = SimulationEngine(config, government=None, recorder=ListRecorder())
     engine.remote_reflection = True
     while engine.world.tick < config.total_ticks:
         if engine.pending_reflection is not None:
-            engine.submit_memory(memory_for(engine.pending_reflection))
+            engine.submit_memory(gov.reflect(engine.pending_reflection, engine.memory))
         else:
             engine.step([GovernmentDecision(GovernmentActionType.IMPORT_FOOD, {"qty": 2})])
     return engine
@@ -58,7 +61,8 @@ def test_remote_reflection_matches_local(small_config):
 
     assert remote.history == local.history
     assert remote.reports == local.reports
-    assert remote.memory_versions == local.memory_versions == ["", "# 天災 1 的經驗", "# 天災 2 的經驗"]
+    assert remote.memory_versions == local.memory_versions and len(local.memory_versions) == 3
+    assert "天災 2 的經驗" in local.memory_versions[2] and "- 第 2 次" in local.memory_versions[2]
     assert remote.recorder.rows == local.recorder.rows  # 紀錄檔的內容與順序都一樣
 
 

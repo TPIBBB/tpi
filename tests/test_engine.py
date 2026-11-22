@@ -1,9 +1,10 @@
 import json
+import re
 from dataclasses import replace
 
 import pytest
 
-from civsim.agents import LLMGovernment
+from civsim.agents import LLMGovernment, NoGovernment
 from civsim.agents.llm import ScriptedClient
 from civsim.analysis.goals import evaluate_disaster, first_sustained
 from civsim.config import DisasterConfig, SocialRuleConfig
@@ -112,10 +113,22 @@ def test_reset_restores_initial_world_but_keeps_tick(small_config):
     assert engine.world.government == engine.initial_world.government
 
 
-def scripted_government(decisions: list[dict], memory: str | None = "# 記憶 v1"):
+def is_reflection(user: str) -> bool:
+    return user.startswith("## 這次天災")
+
+
+def lessons_reply(user: str, lesson: str = "記憶 v1") -> str:
+    """照抄報告的結果，教訓帶上第幾次天災（每次都不一樣，才不會被當成照抄舊版而重問）。"""
+    disaster = re.search(r"第 (\d+) 次", user).group(1)
+    result = "失敗" if "- 結果：失敗" in user else "成功"
+    return json.dumps({"result": result, "analysis": "測試", "worked": [], "failed": [],
+                       "try_next": [f"{lesson}（第{disaster}次）"]}, ensure_ascii=False)
+
+
+def scripted_government(decisions: list[dict], lesson: str = "記憶 v1"):
     def respond(system, user):
-        if "current_memory" in user:
-            return json.dumps({"memory": memory})
+        if is_reflection(user):
+            return lessons_reply(user, lesson)
         return json.dumps({"actions": decisions})
     return LLMGovernment(ScriptedClient(respond))
 
@@ -145,7 +158,9 @@ def test_reflection_updates_memory_and_report(small_config):
     engine = SimulationEngine(small_config, government=scripted_government([]))
     engine.run()
     assert len(engine.reports) == small_config.disasters.count
-    assert engine.memory == "# 記憶 v1" and len(engine.memory_versions) == 3
+    assert len(engine.memory_versions) == 3
+    assert "記憶 v1（第2次）" in engine.memory  # LLM 寫的教訓
+    assert "- 第 1 次（乾旱）" in engine.memory and "- 第 2 次（乾旱）" in engine.memory  # 程式寫的天災紀錄
     assert engine.reports[1]["memory_version"] == 1
 
 
@@ -158,9 +173,22 @@ def test_no_memory_group_never_reflects(small_config):
 
 
 def test_too_long_memory_is_rejected(small_config):
-    engine = SimulationEngine(small_config, government=scripted_government([], memory="x" * 10_000))
+    class TooLong(NoGovernment):  # LLMGovernment 自己會控制長度，所以直接回傳超長的記憶
+        def reflect(self, report, memory):
+            return "x" * 10_000
+
+    engine = SimulationEngine(small_config, government=TooLong())
     engine.run()
     assert engine.memory_versions == [""]
+
+
+def test_llm_memory_stays_within_limit(small_config):
+    cfg = replace(small_config, government=replace(small_config.government, memory_max_chars=300))
+    gov = scripted_government([], lesson="很長的教訓" * 100)
+    gov.memory_max_chars = 300  # build_government 會從 config 傳進來；這裡直接建立所以手動設定
+    engine = SimulationEngine(cfg, government=gov)
+    engine.run()
+    assert len(engine.memory_versions) == 3 and all(len(m) <= 300 for m in engine.memory_versions)
 
 
 def test_api_mode_accepts_external_decisions(small_config):
@@ -224,7 +252,7 @@ def test_citizen_can_harvest_then_sell_the_same_day(small_config):
 
 def test_failed_reflection_is_logged_separately(small_config):
     def respond(system, user):
-        if "current_memory" in user:
+        if is_reflection(user):
             raise TimeoutError("連線逾時")
         return json.dumps({"actions": []})
 

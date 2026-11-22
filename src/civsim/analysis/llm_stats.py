@@ -56,19 +56,24 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
 
 
 def summarize_calls(calls: list[dict]) -> dict[str, Any]:
-    decide = [c for c in calls if c.get("trigger") != "reflect"]
-    reflect = [c for c in calls if c.get("trigger") == "reflect"]
+    # 反思的 trigger：第一次是 reflect，回答不合格重問時是 reflect-retry（gov-v6 起）
+    is_reflect = lambda c: str(c.get("trigger", "")).startswith("reflect")  # noqa: E731
+    decide = [c for c in calls if not is_reflect(c)]
+    reflect = [c for c in calls if is_reflect(c)]
     used = [c for c in calls if c.get("used_llm")]
     tokens = {k: sum((c.get("usage") or {}).get(k, 0) or 0 for c in used) for k in TOKEN_FIELDS}
     return {
         "decide_days": len(decide),
         "decide_llm": sum(1 for c in decide if c.get("used_llm")),
         "decide_skipped": sum(1 for c in decide if not c.get("used_llm")),  # on_change 沿用上次的決策
-        "reflect": len(reflect),
+        "reflect": sum(1 for c in reflect if c.get("trigger") == "reflect"),  # 反思幾次（= 幾次天災）
+        "reflect_retries": sum(1 for c in reflect if c.get("trigger") != "reflect"),
+        "reflect_kept_old": sum(1 for c in reflect if c.get("used_fallback")),  # 回答一直不合格，保留舊的教訓
         "errors": sum(1 for c in used if c.get("error")),
-        "fallback": sum(1 for c in used if c.get("used_fallback")),
+        "fallback": sum(1 for c in decide if c.get("used_llm") and c.get("used_fallback")),
         "reflect_errors": sum(1 for c in reflect if c.get("error")),
-        "parse_skipped_items": sum(len(c.get("skipped") or []) for c in used),  # 格式錯誤被略過的個別決策
+        # 格式錯誤被略過的個別決策（反思的 skipped 是檢查沒通過的說明，不算在這裡）
+        "parse_skipped_items": sum(len(c.get("skipped") or []) for c in decide if c.get("used_llm")),
         "error_samples": [c["error"] for c in used if c.get("error")][:5],
         "tokens": tokens,
         "tokens_per_llm_call": round(tokens["total_tokens"] / len(used), 1) if used else 0,
@@ -148,7 +153,8 @@ def format_summary(s: dict[str, Any]) -> str:
     lines += [
         "",
         "【LLM 呼叫】",
-        f"決策日 {c['decide_days']} 天：呼叫 LLM {c['decide_llm']} 次、沿用上次決策（跳過）{c['decide_skipped']} 次；反思 {c['reflect']} 次",
+        f"決策日 {c['decide_days']} 天：呼叫 LLM {c['decide_llm']} 次、沿用上次決策（跳過）{c['decide_skipped']} 次；"
+        f"反思 {c['reflect']} 次（重問 {c.get('reflect_retries', 0)} 次、保留舊教訓 {c.get('reflect_kept_old', 0)} 次）",
         f"失敗 {c['errors']} 次（其中改用 fallback {c['fallback']} 次、反思失敗 {c['reflect_errors']} 次），"
         f"格式錯誤被略過的決策 {c['parse_skipped_items']} 個",
         f"token：輸入 {c['tokens']['prompt_tokens']:,}、輸出 {c['tokens']['output_tokens']:,}、"
