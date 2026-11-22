@@ -21,6 +21,8 @@ from civsim.world.government import GovernmentObservation
 
 PROMPT_FINGERPRINTS = {
     "gov-v4": "a6e7fe4ffa98aa42",
+    "gov-v5": "42d4af2a1e6a8421",
+    "gov-v6": "e646c39f856f6296",
 }
 
 

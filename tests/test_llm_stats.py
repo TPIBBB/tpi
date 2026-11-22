@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import replace
 
 import pytest
@@ -23,8 +24,11 @@ def run_dir(small_config, tmp_path):
     )
 
     def respond(system, user):
-        if "current_memory" in user:
-            return json.dumps({"memory": "# 經驗\n- 進口有用"})
+        if user.startswith("## 這次天災"):
+            disaster = re.search(r"第 (\d+) 次", user).group(1)
+            result = "失敗" if "- 結果：失敗" in user else "成功"
+            return json.dumps({"result": result, "worked": [], "failed": [],
+                               "try_next": [f"進口有用（第{disaster}次）"]}, ensure_ascii=False)
         r = next(replies)
         return r if isinstance(r, str) else json.dumps(r)
 
