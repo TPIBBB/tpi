@@ -190,7 +190,9 @@ world-api (api/server.py + api/government.py) ── 模擬引擎；平民在這
   政府 client（`gateway/client.py`，用 `python -m civsim govern` 啟動）輪詢 `GET /government/observation`。
   有記憶的組別在評估期結束時會停在 `awaiting_reflection`，等政府送來新版記憶（見 api.md）。
 - **基礎設施錯誤**（限流、逾時、驗證失敗）有上限地重試；仍然失敗就把整個 run 標記為無效，
-  不會默默變成 IDLE。
+  不會默默變成 IDLE。經過 digiRunner 時，驗證失敗分兩種處理：401（沒有 token 或 token 過期）會換一次 token 再送；
+  403（這個 client 沒有權限呼叫這條路徑）**不重試**，直接把 run 標記為無效，因為那是 digiRunner 的權限設定問題，
+  重試也不會變（見 [digirunner_setup.md](digirunner_setup.md)）。
 - 第一版一次只跑一個 run，但路徑預留 `run_id`（`/runs/{run_id}/government/...`），之後平行執行不必改路由。
 - 本機和遠端的政府都實作同一個 `GovernmentController` Protocol。
 

@@ -1,0 +1,2 @@
+# bash 腳本永遠用 LF 換行：Windows 上的 Git 預設會轉成 CRLF，bash 遇到 CRLF 會執行失敗
+*.sh text eol=lf

@@ -29,6 +29,11 @@
 
 設定和測試的過程中，**world-api 的終端機要一直開著**。
 
+**Linux（沒有 Docker Desktop）**：`docker-compose.yml` 已經用 `extra_hosts` 把 `host.docker.internal` 指到主機，
+但容器連過來的是 Docker 網橋的位址（通常是 `172.17.0.1`），不是本機的 `127.0.0.1`，所以 world-api 要聽那個位址：
+`python -m civsim serve --config configs/baseline.yaml --host 172.17.0.1`（用 `ip addr show docker0` 查實際位址）。
+不要用 `--host 0.0.0.0`，那會讓同一個網路的人都連得到 world-api。這段還沒有在 Linux 上實測過，遇到問題請回報。
+
 ## 1. 啟動 digiRunner
 
 在專案資料夾：
@@ -121,6 +126,10 @@ $pw
 
 `.env` 不會被推上 GitHub。密碼不要貼到群組，截圖時也不要讓密碼入鏡。
 
+上面的指令把帳密**加在 `.env` 的最後面**。`.env` 裡同一個名稱出現兩次時，civsim 和檢查腳本都**只讀第一個**，
+所以如果你的 `.env` 前面已經有空白的 `DIGIRUNNER_CLIENT_ID=` 這類行（從舊版 `.env.example` 複製來的），要先刪掉，
+否則讀到的會是空值。新版 `.env.example` 已經把這幾行註解掉了。
+
 「**用戶端管理**」→「**用戶端維護**」→「**建立**」
 
 | 欄位 | 政府 | 前端 |
@@ -162,10 +171,16 @@ $pw
 
 ## 6. 驗證
 
-**檢查身分和權限**（在專案資料夾）：
+**檢查身分、權限與限流**（在專案資料夾，world-api 要**剛啟動**，run 還沒跑完）：
 
 ```powershell
+# Windows
 powershell -ExecutionPolicy Bypass -File deploy/digirunner/check_auth.ps1
+```
+
+```bash
+# Mac / Linux
+bash deploy/digirunner/check_auth.sh
 ```
 
 ```
@@ -174,11 +189,14 @@ OK   2. 政府呼叫政府的路徑               放行（200），預期放行
 OK   3. 政府呼叫 /world/disasters       擋下（403），預期擋下
 OK   4. 前端呼叫 /world/disasters       放行（200），預期放行
 OK   5. 前端呼叫政府的路徑               擋下（403），預期擋下
+OK   6. 政府連續呼叫 30 次             都放行，沒有被限流
 
 全部符合預期
 ```
 
-第 2 項如果 run 已經跑完，world-api 會回 409，仍然算「放行」：身分驗證已經通過，是 world-api 說這個 run 結束了。
+判斷規則：2xx 算「放行」，401／403 算「擋下」（digiRunner 擋的），**其他一律算「失敗」**，包括連不上、404、409。
+腳本開始前會先確認 world-api 上有一個「還在等決策」的 run，沒有的話會直接停下來，請你重開 `civsim serve`，
+因為 run 跑完之後政府的路徑會回 409，權限就測不到了。第 6 項是在確認 TPS/Node 有改成 0：預設的每秒 10 次會讓連續呼叫出現 429。
 
 **經過 digiRunner 跑完整個 run**（world-api 剛啟動、還沒跑過的 run）：
 
@@ -203,8 +221,19 @@ python -m civsim govern --base-url http://localhost:31080
   呼叫 `POST /oauth/token` 換 token，之後每個請求帶 `Authorization: Bearer <token>`
 - 換 token 的 Basic 值是 **`Base64(帳號 + ":" + Base64(密碼))`**，密碼要先自己 Base64 一次，和一般的 HTTP Basic 不同
 - token 預設 1 天過期，過期後收到 401 會自動重新申請
-- 收到 403（這個 client 沒有權限）、帳密錯誤、換到的 token 仍被拒絕 → run 作廢
+- 收到 403（這個 client 沒有權限）、帳密錯誤、換到的 token 仍被拒絕、token 回應不是 JSON → run 作廢。
+  403 不重試，因為那是 digiRunner 的權限設定問題，重試也不會變；這點也寫進了 architecture.md
 - 直連 world-api 時永遠不會收到 401，所以不會去申請 token
+- 帳密用 `ClientCredentials` 包起來，密碼不會出現在 `repr()` 和錯誤訊息裡
+
+## 已確認與還沒驗證的事
+
+| 項目 | 狀態 |
+|---|---|
+| 9 條路徑的 `apiCacheFlag` 是 `"1"` | ✅ 已確認是**不快取**（digiRunner 原始碼：`"2"` 是自動快取、`"3"` 是固定快取），所以政府每天拿到的觀察都是最新的 |
+| 政府 client 不被限流 | ✅ 檢查腳本第 6 項 |
+| `X-Run-Id` 有沒有被 digiRunner 轉送給 world-api、有沒有寫進 digiRunner 的存取紀錄 | ⬜ **還沒驗證**，是第 3 週「存取紀錄對應到每個 run」的工作 |
+| Linux 上的連線設定（第 0 步） | ⬜ 還沒在 Linux 上實測 |
 
 ## 常見問題
 
@@ -218,6 +247,9 @@ python -m civsim govern --base-url http://localhost:31080
 | 回應 401 | 沒帶 token 或 token 無效（digiRunner 擋的） |
 | 回應 403 | token 有效，但這條路徑不在這個 client 的群組裡（digiRunner 擋的） |
 | 回應 409、422、404 | 已經到 world-api 了，是 world-api 的規則，例如 run 已經跑完（重開 `civsim serve`） |
+| 檢查腳本說「讀不到 /runs（500）」 | digiRunner 連不到 world-api：world-api 沒開，或 Linux 上 world-api 沒聽 Docker 網橋的位址 |
+| 檢查腳本說「run 的狀態是 finished」 | 這個 run 已經跑完，重開 `civsim serve` 再檢查 |
+| 檢查腳本說「第一個 … 是空的」 | `.env` 前面有空白的同名設定，刪掉它（見第 4 步） |
 | `civsim govern` 不加 `--base-url` 卻連到 18080 | 舊版 `.env.example` 留下的 `DIGIRUNNER_BASE_URL=http://localhost:18080`，刪掉或改成 31080 |
 | 換 token 失敗、帳密錯誤 | 檢查 `.env` 和後台的帳號是否一字不差；Token 設定是否勾了 Client Credentials |
 | 忘記 client 密碼 | 打開 `.env` 看；或到「安全性 → 密碼管理」設新的，再改 `.env` |
