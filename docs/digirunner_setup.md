@@ -108,7 +108,10 @@ docker compose up -d dgr
 
 ## 4. 建立兩個 client（帳號）
 
-先產生密碼，同時寫進 `.env`（在專案資料夾執行，最後一行會印出密碼，填表單時複製它）：
+先產生密碼，同時寫進 `.env`（在專案資料夾執行，最後一行會印出密碼，填表單時複製它）。
+兩個版本產生的密碼格式一樣：32 個字，只有英文字母、數字、`-`、`_`。
+
+**Windows（PowerShell）**
 
 ```powershell
 # 政府
@@ -123,6 +126,24 @@ $b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create
 Add-Content .env "`nDIGIRUNNER_FRONTEND_CLIENT_ID=civsim-frontend`nDIGIRUNNER_FRONTEND_CLIENT_SECRET=$pw"
 $pw
 ```
+
+**Mac / Linux（bash、zsh）**
+
+```bash
+# 政府
+pw=$(head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')
+printf '\nDIGIRUNNER_CLIENT_ID=civsim-gov\nDIGIRUNNER_CLIENT_SECRET=%s\n' "$pw" >> .env
+echo "$pw"
+```
+
+```bash
+# 前端（只在測試權限時用到）
+pw=$(head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')
+printf '\nDIGIRUNNER_FRONTEND_CLIENT_ID=civsim-frontend\nDIGIRUNNER_FRONTEND_CLIENT_SECRET=%s\n' "$pw" >> .env
+echo "$pw"
+```
+
+也可以不用指令，自己想一組密碼，手動在 `.env` 加上這兩行。用指令的好處是密碼夠隨機，而且直接寫進 `.env`，不會在複製時打錯字。
 
 `.env` 不會被推上 GitHub。密碼不要貼到群組，截圖時也不要讓密碼入鏡。
 
