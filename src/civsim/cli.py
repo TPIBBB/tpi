@@ -94,6 +94,8 @@ def cmd_govern(args) -> None:
         raise SystemExit(1) from None
     print(f"\n完成：共 {summary['days']} 天、反思 {summary['reflections']} 次，"
           f"逾時後確認已送達 {summary['recovered']} 次")
+    if summary["token_requests"]:
+        print(f"經過 digiRunner：以 client {client.client_id} 申請 token {summary['token_requests']} 次")
 
 
 def cmd_llm_check(args) -> None:

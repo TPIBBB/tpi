@@ -350,7 +350,11 @@ lockstep 下，**每次 POST 都會讓世界前進一天**。如果政府 client
 - 直連模式（開發用）沒有任何驗證，只能在自己的電腦上用。
 - 正式實驗時，world-api 只能經由 digiRunner 呼叫，不對外開放 8000 port。
 - 實驗用的政府 client **不設流量限制**（architecture.md），否則實驗會跑到一半被擋。
-- token 放在 `Authorization: Bearer <token>`，取得方式依 digiRunner 的設定，之後補在本文件。
+- 經過 digiRunner 時的網址是 `http://localhost:31080`，路徑和直連時完全相同。
+- 身分驗證用 digiRunner 的 Client Credentials：client 用帳密向 `POST /oauth/token` 換 token，之後帶
+  `Authorization: Bearer <token>`。政府 client（`gateway/client.py`）收到 401 會自動換 token，收到 403 會讓 run 作廢。
+- digiRunner 的設定步驟、兩個 client 與群組的權限、驗證方式見 [digirunner_setup.md](digirunner_setup.md)。
+  目前已在 digiRunner 實作上面那張表：政府的 client 呼叫 `/world/disasters` 會被擋下（403）。
 
 ## 前端路徑
 
@@ -448,4 +452,4 @@ while True:
 
 ## 待補
 
-- digiRunner 的 token 取得方式與 base URL（部署完成後補）
+- 前端經過 digiRunner 時，client 帳密要放在哪裡（瀏覽器裡的程式碼看得到帳密，做法和前端組討論中）

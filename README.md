@@ -330,7 +330,8 @@ civsim govern
 格式與各項待確認的決定見 [docs/api.md](docs/api.md)。
 
 `civsim govern --base-url <網址>` 可以改連 digiRunner；`--controller llm` 改用 LLM 政府（等 Agent 串接供應商後可用）。
-PostgreSQL 與 digiRunner 用 `docker compose up` 啟動（digiRunner 設定待補）。
+PostgreSQL 與 digiRunner 用 `docker compose up` 啟動。讓政府經過 digiRunner 呼叫（身分驗證、權限）的設定方式見
+[docs/digirunner_setup.md](docs/digirunner_setup.md)。
 
 # 專案結構
 
@@ -349,8 +350,10 @@ src/civsim/
 configs/             實驗條件設定檔
 rules/               社會規則集（有版本號）
 db/schema.sql        PostgreSQL schema
+deploy/digirunner/   digiRunner 的路徑匯入檔與權限檢查腳本
 docs/architecture.md 架構與專案邊界
 docs/api.md          world-api 的 HTTP 格式（政府路徑、lockstep、待確認的決定）
+docs/digirunner_setup.md digiRunner 設定：匯入路徑、群組與 client、身分驗證
 docs/society.md      社會規則：初始狀態、回合流程、市場、均衡價格、天災、政府行動
 tests/
 ```

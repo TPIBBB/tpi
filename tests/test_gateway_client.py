@@ -76,7 +76,7 @@ class ImportEveryDay:
 def test_runs_whole_run(server, engine):
     summary = run_government(client(server), NoGovernment())
     assert summary == {"run_id": RUN, "days": engine.config.total_ticks,
-                       "reflections": len(engine.schedule), "recovered": 0}
+                       "reflections": len(engine.schedule), "recovered": 0, "token_requests": 0}
     assert engine.world.tick == engine.config.total_ticks
     assert engine.memory_versions == [""]  # NoGovernment 從不更新記憶
 
