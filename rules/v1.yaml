@@ -1,0 +1,66 @@
+
+# 社會規則 v1
+# 根據 B 組初步實驗觀察建立
+version: v1
+
+rules:
+  # Don't：行為禁止型
+  - id: no_execution
+    text: 不得任意處決平民
+    kind: dont
+    forbids: [execute_citizen]
+
+  - id: no_currency
+    text: 不得擅自發行貨幣
+    kind: dont
+    forbids: [issue_currency]
+
+  # Do：政府應該遵守的行為指引
+  - id: evaluate_existing_policy
+    text: >
+      當現有政策仍然有效時，應先評估是否有必要追加干預，
+      避免在沒有必要的情況下重複採取相同政策。
+    kind: do
+
+  - id: evaluate_market_before_price_control
+    text: >
+      採取價格管制前，應評估市場供需、糧價變化及政策可能造成的影響，
+      並選擇適當的政策持續時間。
+    kind: do
+
+  - id: verify_aid_eligibility
+    text: >
+      發放糧食等救濟措施前，應先確認是否存在符合救濟條件的居民，
+      並確認救濟對象與政策設定相符。
+    kind: do
+
+  - id: prioritize_vulnerable_citizens
+    text: >
+      當糧食資源有限時，應優先考慮挨餓及糧食不足的居民，
+      使救濟資源能夠提供給有需要的人。
+    kind: do
+
+  - id: review_policy_outcomes
+    text: >
+      採取政策後，應觀察市場價格、居民糧食及飢餓狀況，
+      再決定是否延續、調整或停止政策。
+    kind: do
+
+  # Don't：行為指引型
+  - id: avoid_unnecessary_repeated_intervention
+    text: >
+      不應在未評估現有政策效果及必要性的情況下，
+      反覆重新執行相同政策。
+    kind: dont
+
+  - id: avoid_unnecessary_aid_requests
+    text: >
+      不應在沒有符合救濟資格的居民時，
+      反覆提出無法執行的糧食發放請求。
+    kind: dont
+
+  - id: avoid_ineffective_price_control
+    text: >
+      不應在未評估市場狀況及價格管制效果前，
+      持續或重複進行價格干預。
+    kind: dont
