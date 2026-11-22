@@ -1,4 +1,4 @@
-import type { SimEvent, TickMetrics, WorldState } from "./types";
+import type { EquilibriumBand, SimEvent, TickMetrics, WorldState } from "./types";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -20,4 +20,31 @@ export function parseJsonl<T>(text: string): T[] {
     .split("\n")
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line) as T);
+}
+
+// ---- 已發布的實驗結果：public/runs/<id>/，網址加 ?run=<id> 直接打開 ----
+export interface PublishedRun {
+  id: string;
+  label: string;
+}
+
+async function getStatic(path: string): Promise<string> {
+  const res = await fetch(`${import.meta.env.BASE_URL}${path}`);
+  if (!res.ok) throw new Error(`${path} 回傳 ${res.status}`);
+  return res.text();
+}
+
+/** public/runs/index.json 列出的實驗；新增實驗時把資料夾放進 public/runs/，再加一筆到 index.json */
+export async function listRuns(): Promise<PublishedRun[]> {
+  return JSON.parse(await getStatic("runs/index.json")) as PublishedRun[];
+}
+
+export async function loadRun(id: string): Promise<{ metrics: TickMetrics[]; band: EquilibriumBand | null }> {
+  const [metrics, disasters] = await Promise.all([
+    getStatic(`runs/${id}/metrics.jsonl`),
+    getStatic(`runs/${id}/disasters.jsonl`),
+  ]);
+  // 均衡區間在 run 開始時算一次，每次天災報告裡都一樣，取第一筆
+  const reports = parseJsonl<{ band?: EquilibriumBand }>(disasters);
+  return { metrics: parseJsonl<TickMetrics>(metrics), band: reports[0]?.band ?? null };
 }

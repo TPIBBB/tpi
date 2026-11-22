@@ -1,0 +1,4 @@
+[
+  { "id": "group_a", "label": "A 組試跑：沒有記憶、有社會規則、1 次天災（Qwen2.5-7B、gov-v4、seed 42）" },
+  { "id": "group_c", "label": "C 組試跑：有記憶、有社會規則、2 次天災（Qwen2.5-7B、gov-v4、seed 42）" }
+]
