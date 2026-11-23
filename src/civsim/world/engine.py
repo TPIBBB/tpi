@@ -7,7 +7,8 @@
 4. 市場          world/market.py      集合競價，所有成交都用同一個價格
 5. 吃飯          每人吃掉 food_per_day，不夠吃就算挨餓
 6. 記錄          事件、指標
-7. 評估期最後一天：analysis/goals.py 產生報告 → 政府反思、更新記憶 → 社會調回均衡狀態（初始世界）
+7. 評估期最後一天：analysis/goals.py 產生報告 → 政府反思、更新記憶 → 社會調回均衡狀態
+   （equilibrium.start_converged：校準期收斂後的世界；關掉時是初始世界）
 
 政府先於平民結算，所以平民當天就看得到政府的價格上限；政府的買賣單和平民的單在同一場競價撮合。
 
@@ -30,7 +31,7 @@ from civsim.models import FOOD, GOV_ID, Action, ActionType, Event, Observation, 
 from civsim.storage.recorder import NullRecorder, Recorder
 from civsim.world import rules
 from civsim.world.disasters import Disaster, begin_tick_events, build_schedule, disaster_at
-from civsim.world.equilibrium import EquilibriumBand, calibrate
+from civsim.world.equilibrium import EquilibriumBand, calibrate, converged_world
 from civsim.world.government import GovernmentDecision, GovernmentObservation, settle, validate
 from civsim.world.market import settle_market
 from civsim.world.setup import create_world
@@ -63,8 +64,11 @@ class SimulationEngine:
             band, self.calibration_prices = calibrate(config)
         self.band: EquilibriumBand | None = band
 
-        # 均衡狀態 = 初始世界；每次評估期結束都調回這個狀態
-        self.initial_world: WorldState = create_world(config, random.Random(config.seed))
+        # 均衡狀態：每次評估期結束都調回這個狀態。start_converged = 校準期收斂後的世界，否則是初始世界
+        if config.equilibrium.start_converged:
+            self.initial_world: WorldState = converged_world(config)
+        else:
+            self.initial_world = create_world(config, random.Random(config.seed))
         self.world: WorldState = copy.deepcopy(self.initial_world)
         self.cycle = 0
         self._start_cycle(0)

@@ -88,6 +88,9 @@ class EquilibriumConfig:
     burn_in_days: int = 20  # 前幾天還在從初始狀態收斂，不算
     k: float = 2.0  # 會議定 2～3；2.5 時波動大的 seed 區間太寬（見 docs/society.md）
     min_half_width: float = 0.02  # 標準差太小時，區間半寬至少是平均的這個比例
+    # true：正式模擬從「校準期跑完 burn_in_days 天、價格已收斂」的世界開始，每次天災後也調回這個狀態；
+    # false：從初始世界開始（價格約 5.6，要約 10 天才收斂到均衡區間），舊版的行為
+    start_converged: bool = True
 
 
 @dataclass
