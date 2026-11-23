@@ -1,13 +1,16 @@
-name: CI
+# 後端測試：backend/ 有改動時執行（原本 tpi_backend 的 CI）
+name: 後端 CI
 
 on:
   push:
     branches: [main]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: backend-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -18,6 +21,9 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v7
 
@@ -25,6 +31,7 @@ jobs:
         uses: astral-sh/setup-uv@v10.3.3  # 這個 action 沒有 v10 這種大版本標籤，要寫完整版本
         with:
           enable-cache: true
+          working-directory: backend
 
       # Python 版本依 .python-version；--locked 會在 uv.lock 沒更新時直接失敗
       - name: Install dependencies
