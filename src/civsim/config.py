@@ -34,7 +34,7 @@ class CitizenConfig:
 @dataclass
 class MarketConfig:
     base_price: float = 5.0  # 糧食的基準價值（習慣價格，貨幣量倍率之前）
-    anchor_weight: float = 0.5  # 報價時習慣價格的權重，其餘參考昨天的成交價（越小價格越黏）
+    anchor_weight: float = 0.2  # 報價時習慣價格的權重，其餘參考昨天的成交價（越小價格越黏；0.5 時市場會自己恢復，見 docs/society.md）
     urgency_premium: float = 1.0  # 存糧見底時，買價最多比參考價高多少（1.0 = +100%）
     surplus_discount: float = 0.3  # 存貨越多，賣價最多比參考價低多少
     greed_markup: float = 0.2  # 最貪心的賣家，賣價比參考價高多少
@@ -53,6 +53,8 @@ class GovernmentConfig:
     import_premium: float = 1.5  # 進口單價 = 習慣價格 × 這個倍率
     max_import_per_day: float = 100.0
     recent_decisions: int = 20  # 觀察裡保留最近幾筆決策結果
+    # 觀察裡的價格歷史：這次週期內政府自己看過的每日成交價，None = 整個週期。不含均衡區間（11/20 決定）
+    price_history_days: int | None = None
     # 什麼時候呼叫 LLM（agents/government.py）：always = 每天；on_change = 狀況沒變就沿用上次的決策，不呼叫
     call_policy: str = "always"
     price_tolerance: float = 0.05  # on_change：價格和上次呼叫時相差不到 5% 算沒變
@@ -69,7 +71,7 @@ class DisasterConfig:
     count: int = 5
     stable_days: int = 20  # 穩定期的平均天數
     stable_jitter: int = 5  # 每次穩定期在 stable_days ± jitter 天內隨機，政府才學不到天災的固定時間
-    disaster_days: int = 5
+    disaster_days: int = 8
     evaluation_days: int = 15
     kind: str = "drought"
     food_multiplier: float = 0.2  # 天災期間的收成倍率
@@ -86,6 +88,9 @@ class EquilibriumConfig:
     burn_in_days: int = 20  # 前幾天還在從初始狀態收斂，不算
     k: float = 2.0  # 會議定 2～3；2.5 時波動大的 seed 區間太寬（見 docs/society.md）
     min_half_width: float = 0.02  # 標準差太小時，區間半寬至少是平均的這個比例
+    # true：正式模擬從「校準期跑完 burn_in_days 天、價格已收斂」的世界開始，每次天災後也調回這個狀態；
+    # false：從初始世界開始（價格約 5.6，要約 10 天才收斂到均衡區間），舊版的行為
+    start_converged: bool = True
 
 
 @dataclass

@@ -2,7 +2,7 @@
 
 所有 LLM 呼叫都經過有 complete(system, user) -> str 的 LLMClient：
 - GeminiClient：呼叫 Google Gemini API（免費版每天只有少量呼叫次數），或 GCP 上的 Vertex AI（付費、沒有每日上限）
-- OpenAICompatibleClient：呼叫 OpenAI 相容 API，例如 Modal 上自己架的 vLLM（modal/llm_server.py）或本機 Ollama
+- OpenAICompatibleClient：呼叫 OpenAI 相容 API，例如 Modal 上自己架的 vLLM（deploy/modal_llm.py）或本機 Ollama
 - ScriptedClient：不連網的假 LLM，給測試與流程演練用
 
 環境變數（可寫在專案根目錄的 .env，由 cli 讀入）：
@@ -143,7 +143,7 @@ class GeminiClient:
             from google import genai
             from google.genai import types
         except ImportError as e:
-            raise ImportError('尚未安裝 Gemini SDK，請執行 pip install -e ".[llm]"') from e
+            raise ImportError('尚未安裝 Gemini SDK，請執行 uv sync --extra llm') from e
         if vertex and project:
             # 用 gcloud auth application-default login 的登入資訊，費用算在這個 GCP 專案
             auth: dict[str, Any] = {"vertexai": True, "project": project, "location": location or "global"}
@@ -181,7 +181,7 @@ class GeminiClient:
 
 
 class OpenAICompatibleClient:
-    """呼叫 OpenAI 相容的 Chat Completions API：Modal 上的 vLLM（modal/llm_server.py）、Ollama 等。
+    """呼叫 OpenAI 相容的 Chat Completions API：Modal 上的 vLLM（deploy/modal_llm.py）、Ollama 等。
 
     base_url 指到 /v1 為止，例如 https://xxx.modal.run/v1 或 http://localhost:11434/v1。
     遇到逾時、限流與伺服器錯誤會等一下再重試；重試後仍失敗會丟出 LLMError，由 LLMGovernment 改用 fallback。
@@ -204,7 +204,7 @@ class OpenAICompatibleClient:
         try:
             import httpx
         except ImportError as e:
-            raise ImportError('尚未安裝 httpx，請執行 pip install -e ".[llm]"') from e
+            raise ImportError('尚未安裝 httpx，請執行 uv sync --extra llm') from e
         if not model:
             raise ValueError("OpenAI 相容模式要設定 LLM_MODEL（伺服器上的模型名稱）")
         if not base_url:
@@ -337,3 +337,39 @@ def load_dotenv(path: str | Path = ".env") -> None:
         key, value = key.strip(), value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+# ---- 正式實驗前的設定檢查 ----
+def llm_settings() -> dict[str, Any]:
+    """目前環境變數裡的 LLM 設定（不含 API key），寫進每個 run 的 meta.json，之後才查得到結果是哪個模型跑的。"""
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    model = os.getenv("LLM_MODEL", "").strip()
+    seed = os.getenv("LLM_SEED", "").strip()
+    return {
+        "provider": provider or None,
+        "model": model or (DEFAULT_GEMINI_MODEL if provider in ("gemini", "vertex") else None),
+        "model_from_env": bool(model),  # False = 用程式裡的預設模型
+        "base_url": os.getenv("LLM_BASE_URL", "").strip() or None,
+        "temperature": float(os.getenv("LLM_TEMPERATURE", "0") or 0),
+        "seed": int(seed) if seed.lstrip("-").isdigit() else None,
+    }
+
+
+def unlocked_settings(settings: dict[str, Any] | None = None) -> list[str]:
+    """正式實驗前要鎖定的設定，還沒鎖定的回傳說明；空清單表示都鎖定了。
+
+    模型、temperature、seed 沒有固定的話，同一組條件重跑會得到不同結果，A、C 組也不能比較。
+    """
+    s = settings if settings is not None else llm_settings()
+    problems = []
+    if not s["provider"]:
+        problems.append("沒有設定 LLM_PROVIDER")
+    if not s["model_from_env"]:
+        problems.append(f"沒有設定 LLM_MODEL，正在用程式的預設模型 {s['model']}；預設值改了結果就會變，請明確寫在 .env")
+    elif "latest" in (s["model"] or "").lower():
+        problems.append(f"LLM_MODEL={s['model']} 是會自動更新的別名，請改成固定版本")
+    if s["temperature"] != 0:
+        problems.append(f"LLM_TEMPERATURE={s['temperature']}，正式實驗建議用 0")
+    if s["seed"] is None:
+        problems.append("沒有設定 LLM_SEED（整數），相同輸入比較難得到相同回應")
+    return problems

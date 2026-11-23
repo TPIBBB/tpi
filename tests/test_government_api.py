@@ -70,8 +70,14 @@ def test_accepted_decision_has_result(client, engine):
     budget = engine.world.government.budget
     [d] = decide(client, 0, {"type": "import_food", "params": {"qty": 10}, "reason": "補儲備"}).json()["decisions"]
     assert d["accepted"] is True and d["type"] == "import_food" and d["reason"] == "補儲備"
-    assert d["result"]["qty"] == 10
+    assert d["result"]["qty"] == 10 and d["replayed"] is False and "replayed" not in d["result"]
     assert engine.world.government.budget < budget
+
+
+def test_replayed_flag_is_recorded(client, engine):
+    [d] = decide(client, 0, {"type": "import_food", "params": {"qty": 10}, "replayed": True}).json()["decisions"]
+    assert d["accepted"] is True and d["replayed"] is True
+    assert engine.cycle_decisions[-1]["replayed"] is True
 
 
 def test_rejected_decision_is_200_and_shown_next_day(client):
@@ -157,11 +163,10 @@ def test_reflection_pauses_before_reset(client, engine):
     assert len(data["report"]["decisions"]) > 0  # 政府看得到這次天災自己做過的決策
 
 
-def test_cannot_decide_or_step_while_reflecting(client, engine):
+def test_cannot_decide_while_reflecting(client, engine):
     reach_reflection(client, engine)
     assert client.get(OBS).json()["error"] == "wrong_status"
     assert decide(client, engine.world.tick).json()["error"] == "wrong_status"
-    assert client.post("/admin/step").status_code == 409
 
 
 def test_reflection_paths_only_while_reflecting(client):

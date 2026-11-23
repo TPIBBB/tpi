@@ -3,13 +3,12 @@
 為什麼：Gemini 免費版每天只能呼叫 20 次，跑不完實驗。Modal 免費方案每月有 $30 的 GPU 額度，
 自己架模型就沒有呼叫次數限制，只算 GPU 開機的時間。
 
-第一次使用：
-    pip install modal
-    modal setup                                   # 登入 Modal（會開瀏覽器）
-    modal secret create civsim-llm-key VLLM_API_KEY=<自己設一組長一點的密碼>
-    modal run deploy/modal_llm.py::download       # 先把模型下載到 Volume（只用 CPU，約 10 分鐘，只要做一次）
-    modal deploy deploy/modal_llm.py              # 部署，完成後會印出網址
-（在專案的 .venv 裡沒有 modal 指令時，把 modal 換成 uvx modal）
+第一次使用（用 uvx 執行 modal CLI，不用另外安裝；只有負責部署的人要做，其他人只要填 .env）：
+    uvx modal setup                                   # 登入 Modal（會開瀏覽器）
+    uvx modal secret create civsim-llm-key VLLM_API_KEY=<自己設一組長一點的密碼>
+    uvx modal run deploy/modal_llm.py::download       # 先把模型下載到 Volume（只用 CPU，約 10 分鐘，只要做一次）
+    uvx modal deploy deploy/modal_llm.py              # 部署，完成後會印出網址
+    uvx modal app logs civsim-llm                     # 模型載入失敗時看 log
 
 .env 設定（網址後面要加 /v1）：
     LLM_PROVIDER=modal
@@ -19,7 +18,7 @@
 
 費用：GPU 只在有請求時開機，閒置 SCALEDOWN_MINUTES 分鐘後自動關機，關機後不計費。
 冷啟動（GPU 關機後的第一次呼叫）要等幾分鐘開機與載入模型；之後同一次開機內的呼叫只要幾秒。
-不用時可以用 `modal app stop civsim-llm` 停掉。
+不用時可以用 `uvx modal app stop civsim-llm` 停掉。
 
 換模型：改 MODEL_NAME 後重新 deploy，.env 的 LLM_MODEL 也要改成一樣。正式實驗前要鎖定模型，
 A、C 組才能比較。
@@ -39,7 +38,9 @@ PORT = 8000
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("vllm==0.9.2", "huggingface_hub[hf_transfer]")
+    # vllm 0.9.2 沒有限制 transformers 上限，不鎖的話會裝到 transformers 5.x / huggingface_hub 2.x，
+    # 跟 vllm 0.9.2 不相容、模型載入失敗。鎖在同期版本（會一起帶入 huggingface_hub<1.0）。
+    .pip_install("vllm==0.9.2", "transformers==4.53.3", "huggingface_hub[hf_transfer]<1.0")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 # 模型檔案存在 Volume，之後冷啟動不用重新下載

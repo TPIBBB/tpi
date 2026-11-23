@@ -5,6 +5,12 @@ import pytest
 from civsim.config import DisasterConfig, EquilibriumConfig, SimConfig
 
 
+@pytest.fixture(autouse=True)
+def no_dotenv(monkeypatch):
+    """測試一律不讀開發者的 .env：否則 cli.main() 會補上真的 LLM 設定與金鑰，測試就可能連到外部 API。"""
+    monkeypatch.setattr("civsim.agents.llm_client.load_dotenv", lambda *a, **k: None)
+
+
 @pytest.fixture
 def small_config() -> SimConfig:
     """縮短天數的設定，讓測試跑得快。"""

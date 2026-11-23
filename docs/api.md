@@ -44,8 +44,8 @@ architecture.md 的那一段要同步改成指向本文件。
 | D6 | 反思流程 | 評估期最後一天後進入 `awaiting_reflection`，等記憶送來才重置 | **社會規則組（已改 engine.py）** | 🟡 已實作 |
 | D7 | run 怎麼建立 | 第一版一個 world-api 只跑一個 run，啟動時產生 `run_id` | 實驗分析組 | 🟡 |
 | D8 | 身分驗證 | 交給 digiRunner，world-api 本身不檢查 | 全組 | 🟡 |
-| D9 | `/admin/step` 在 API 模式下 | 停用，回 409 | 前端組 | 🟡 |
-| D10 | `/world/*` 的欄位 | 由前端組決定 | 前端組 | 🟡 |
+| D9 | `/admin/step` 在 API 模式下 | 停用（前端沒有使用） | 前端組 | ✅ 11/15 前端確認，已實作 |
+| D10 | `/world/*` 的欄位 | 先做 `/world/disasters`，欄位沿用 `Disaster`；`/world/memory`、`/world/rules` 之後需要再做 | 前端組 | ✅ 11/15 前端確認，已實作 |
 
 ## 基本約定
 
@@ -124,6 +124,10 @@ architecture.md 的那一段要同步改成指向本文件。
         "tick": 35, "type": "issue_currency", "params": {"amount": 500}, "reason": "補預算",
         "accepted": false, "rejected_reason": "違反社會規則：不能發行貨幣"
       }
+    ],
+    "price_history": [
+      {"tick": 35, "price": 5.12},
+      {"tick": 36, "price": 9.84}
     ]
   }
 }
@@ -143,8 +147,11 @@ architecture.md 的那一段要同步改成指向本文件。
 | `price_cap` | 目前生效的價格上限 `{"price": 12.0, "until": 40}`，沒有就是 `null` |
 | `citizens` | 平民的 id 與類型（**不含**存糧與存款） |
 | `recent_decisions` | 這次天災週期內最近 20 筆決策與結果，被拒絕的有 `rejected_reason` |
+| `recent_decisions[].replayed` | `true` = LLM 當天沒被呼叫，沿用上次的決策（`call_policy: on_change`）；結算方式相同，只是分析時要分開算 |
+| `price_history` | 這次天災週期內每天的成交價，由舊到新，最後一筆就是 `prices.food`；重置後清空。長度由 `government.price_history_days` 控制（預設整個週期）。**不含**均衡區間 |
 
-政府**看不到**：平民的存糧與存款、天災時間表、這個週期的第幾天（11/9 會議決定，不提供預報）。
+政府**看不到**：平民的存糧與存款、天災時間表、均衡區間（11/9 會議決定，不提供預報）。
+`price_history` 的長度等於這個週期過了幾天，政府推得出週期的第幾天；這是 11/20 決定接受的副作用（見 architecture.md）。
 
 ### `POST /runs/{run_id}/government/decisions`
 
@@ -164,6 +171,7 @@ architecture.md 的那一段要同步改成指向本文件。
 - `tick`：必填，必須等於目前的 tick（D3）。
 - `actions`：決策清單。**不想行動就送空陣列 `[]`** 或 `[{"type": "idle"}]`。
 - 一天只能有一個決策（`max_decisions_per_day: 1`）。送超過一個**不會**被 API 擋下，會交給引擎處理：第一個照常執行，其餘記成「超過每天的決策上限」被拒絕，政府隔天在 `recent_decisions` 看得到。這是研究資料的一部分，所以不在 HTTP 層擋。
+- `actions[].replayed`：選填，預設 `false`。政府端沒呼叫 LLM、沿用上次的決策時填 `true`（`civsim govern` 會自動填），只做紀錄，結算方式相同。
 - 可用的 `type` 和 `params` 見 [society.md 的「政府的行動」](society.md#政府的行動worldgovernmentpy)。參數合不合法由引擎檢查，不在 HTTP 層檢查。
 
 **回應 200（D5）：**
@@ -342,36 +350,70 @@ lockstep 下，**每次 POST 都會讓世界前進一天**。如果政府 client
 - 直連模式（開發用）沒有任何驗證，只能在自己的電腦上用。
 - 正式實驗時，world-api 只能經由 digiRunner 呼叫，不對外開放 8000 port。
 - 實驗用的政府 client **不設流量限制**（architecture.md），否則實驗會跑到一半被擋。
-- token 放在 `Authorization: Bearer <token>`，取得方式依 digiRunner 的設定，之後補在本文件。
+- 經過 digiRunner 時的網址是 `http://localhost:31080`，路徑和直連時完全相同。
+- 身分驗證用 digiRunner 的 Client Credentials：client 用帳密向 `POST /oauth/token` 換 token，之後帶
+  `Authorization: Bearer <token>`。政府 client（`gateway/client.py`）收到 401 會自動換 token，收到 403 會讓 run 作廢。
+- digiRunner 的設定步驟、兩個 client 與群組的權限、驗證方式見 [digirunner_setup.md](digirunner_setup.md)。
+  目前已在 digiRunner 實作上面那張表：政府的 client 呼叫 `/world/disasters` 會被擋下（403）。
 
 ## 前端路徑
 
+前端用 Vite 開發（`http://localhost:5173`），符合 world-api 預設允許的跨來源網址（`CIVSIM_CORS_ORIGINS`），不用另外設定。
+
 ### 已經有的
+
+前端目前只用這三條（11/15 前端確認）：
 
 | 路徑 | 內容 |
 |---|---|
 | `GET /world/state` | 目前的 tick、階段、市場、政府、均衡區間、每位平民的狀態 |
 | `GET /world/metrics` | 每天的指標 |
-| `GET /world/events?since_tick=0` | 事件紀錄 |
+| `GET /world/events?since_tick=0` | 事件紀錄（政府每推進一天、每次反思與調回均衡狀態，都會寫入） |
 
-### 🟡 D10：還沒做的（欄位由前端組決定）
+### ✅ D10：`GET /world/disasters`
+
+天災時間表。欄位沿用引擎的 `Disaster`（`src/civsim/world/disasters.py`），不另外加工。
+
+**回應 200**（baseline 設定的實際數值，共 5 筆，這裡只列前 2 筆）：
+
+```json
+[
+  {"id": 1, "kind": "drought", "cycle_start": 0,  "start_tick": 15, "end_tick": 19, "window_end": 34, "food_multiplier": 0.2},
+  {"id": 2, "kind": "drought", "cycle_start": 35, "start_tick": 59, "end_tick": 63, "window_end": 78, "food_multiplier": 0.2}
+]
+```
+
+| 欄位 | 意義 |
+|---|---|
+| `id` | 第幾次天災，從 1 開始 |
+| `kind` | 天災種類，例如 `drought` |
+| `cycle_start` | 這個週期（穩定期）的第一個 tick |
+| `start_tick` | 天災的第一個 tick |
+| `end_tick` | 天災的最後一個 tick |
+| `window_end` | 評估期的最後一個 tick；這一天結束後世界調回均衡狀態 |
+| `food_multiplier` | 天災期間的收成倍率 |
+
+由此可以推出每一天的階段：`cycle_start` ～ `start_tick - 1` 是穩定期，`start_tick` ～ `end_tick` 是天災，`end_tick + 1` ～ `window_end` 是評估期。
+
+⚠️ **這條路徑不能開放給政府的 client。** 研究設計規定政府看不到天災時間表（不提供預報），政府如果讀得到這條，等於事先知道天災什麼時候來。經過 digiRunner 時，這條只授權給前端的 client（見 D8）。
+
+### 之後需要再做
+
+前端目前還沒有要用，需要時再定欄位：
 
 | 路徑 | 內容 |
 |---|---|
-| `GET /world/disasters` | 天災時間表與每次的報告 |
 | `GET /world/memory` | 政府記憶的所有版本 |
 | `GET /world/rules` | 社會規則 |
 
-注意：前端看得到天災時間表，政府看不到。這些路徑**不能**開放給政府的 client，否則等於變相提供預報。
+這兩條同樣只開放給前端。
 
-### 🟡 D9：`POST /admin/step`
+### ✅ D9：停用 `POST /admin/step`
 
-現在的 `/admin/step` 會用本機的政府（或沒有政府）直接推進一天。在 lockstep 下，如果前端或別人呼叫它，世界會**在政府不知道的情況下多跑一天**。
+`/admin/step` 會用本機的政府（或沒有政府）直接推進一天。在 lockstep 下，如果有人呼叫它，世界會**在政府不知道的情況下多跑一天**。
 
-**建議：API 模式下停用，回 409。** 沒有政府的基準模擬（`controller: none`）仍可以用。需要確認前端有沒有在用這條路徑。
+**決定：停用。** 前端確認沒有使用這條路徑（11/15）。這條路徑已經移除，呼叫會回 404 或 405，世界只能經由政府的路徑前進。
 
-目前的實作：還沒停用，但和政府路徑共用同一把鎖，不會同時推進世界；`awaiting_reflection` 時呼叫會回 409。
-有人用它多推了一天的話，政府下次送決策會收到 `409 tick_mismatch`，政府 client 會把 run 作廢，所以會被發現。
 
 ## 政府 client 的規則
 
@@ -410,5 +452,4 @@ while True:
 
 ## 待補
 
-- digiRunner 的 token 取得方式與 base URL（部署完成後補）
-- `/world/*` 新路徑的欄位（等前端組，見 D10）
+- 前端經過 digiRunner 時，client 帳密要放在哪裡（瀏覽器裡的程式碼看得到帳密，做法和前端組討論中）

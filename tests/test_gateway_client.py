@@ -76,7 +76,7 @@ class ImportEveryDay:
 def test_runs_whole_run(server, engine):
     summary = run_government(client(server), NoGovernment())
     assert summary == {"run_id": RUN, "days": engine.config.total_ticks,
-                       "reflections": len(engine.schedule), "recovered": 0}
+                       "reflections": len(engine.schedule), "recovered": 0, "token_requests": 0}
     assert engine.world.tick == engine.config.total_ticks
     assert engine.memory_versions == [""]  # NoGovernment 從不更新記憶
 
@@ -190,9 +190,9 @@ def test_lost_memory_response_is_not_invalid(server, engine):
 
 
 def test_tick_mismatch_without_retry_is_invalid(server):
-    """沒有重送卻收到 409，代表有別人推進了世界（例如 /admin/step），不能繼續。"""
+    """沒有重送卻收到 409，代表有別人推進了世界（例如另一個政府 client），不能繼續。"""
     c = client(server, run_id=RUN)
-    server.post("/admin/step")
+    server.post(f"/runs/{RUN}/government/decisions", json={"tick": 0, "actions": []})  # 別人先送了第 0 天
     with pytest.raises(RunInvalid, match="409"):
         c.submit(0, [])
 

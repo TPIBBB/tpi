@@ -3,7 +3,8 @@
 均衡價格是一個區間（11/9 會議）：用穩定期每日成交價的平均 ± k 個標準差。
 
 穩定期的價格要用「校準期」來算：同一個 seed、同一批平民，但沒有政府、沒有天災，從初始狀態跑
-calibration_days 天，去掉前 burn_in_days 天，剩下每日成交價的平均與標準差就是基準。
+calibration_days 天，去掉前 burn_in_days 天，剩下的日子只取有實際成交的（沒成交那天的價格不是真的成交價），
+這些成交價的平均與標準差就是基準。有效成交日少於 2 天時報錯。
 這樣不論政府平時做了什麼，A／B／C 組同一個 seed 的均衡區間都相同，結果才能比較。
 
 為什麼價格會有均衡點（推導見 docs/society.md）：平民報價的參考價是
@@ -16,10 +17,12 @@ calibration_days 天，去掉前 burn_in_days 天，剩下每日成交價的平�
 
 from __future__ import annotations
 
+import copy
 import statistics
 from dataclasses import asdict, dataclass, replace
 
 from civsim.config import SimConfig
+from civsim.models import WorldState
 
 
 @dataclass(frozen=True)
@@ -56,16 +59,83 @@ def calibration_config(config: SimConfig) -> SimConfig:
         ticks=eq.calibration_days,
         disasters=replace(config.disasters, count=0),
         government=replace(config.government, controller="none"),
+        equilibrium=replace(eq, start_converged=False),  # 校準期本身從初始世界開始
     )
 
 
+def converged_world(config: SimConfig) -> WorldState:
+    """校準期（沒有政府、沒有天災）跑完 burn_in_days 天後的世界：價格已收斂到均衡。
+
+    正式模擬從這個世界開始，每次天災後也調回這個狀態，穩定期一開始價格就在均衡區間附近。
+    平民的庫存、金錢、挨餓天數都是收斂後的值；回合、死亡數、價格上限、天災狀態歸零。
+    """
+    from civsim.world.engine import SimulationEngine  # 延後匯入，避免循環
+
+    engine = SimulationEngine(calibration_config(config), government=None, band=None)
+    for _ in range(config.equilibrium.burn_in_days):
+        engine.step()
+    world = copy.deepcopy(engine.world)
+    world.tick = 0
+    world.deaths = 0
+    world.phase = "stable"
+    world.disaster_id = None
+    world.food_multiplier = 1.0
+    world.market.price_cap = None
+    world.market.price_cap_until = None
+    world.market.orders = []
+    return world
+
+
 def calibrate(config: SimConfig) -> tuple[EquilibriumBand, list[float]]:
-    """回傳 (均衡區間, 校準期每日成交價)。"""
+    """回傳均衡區間，以及校準期每日記錄的價格。"""
     from civsim.world.engine import SimulationEngine  # 延後匯入，避免循環
 
     eq = config.equilibrium
+
     if eq.calibration_days <= eq.burn_in_days:
         raise ValueError("calibration_days 必須大於 burn_in_days")
-    history = SimulationEngine(calibration_config(config), government=None, band=None).run()
-    prices = [m["price"] for m in history]
-    return band_from_prices(prices[eq.burn_in_days:], eq.k, eq.min_half_width), prices
+
+    # 1. 執行沒有政府、沒有天災的校準模擬
+    history = SimulationEngine(
+        calibration_config(config),
+        government=None,
+        band=None,
+    ).run()
+
+    # 2. 確認是否真的跑完預定天數
+    if len(history) != eq.calibration_days:
+        raise ValueError(
+            f"校準期預期 {eq.calibration_days} 天，"
+            f"實際只有 {len(history)} 筆資料"
+        )
+
+    # 3. 去掉前面的收斂期
+    stable_history = history[eq.burn_in_days:]
+
+    # 4. 只取有實際成交的日期
+    traded_rows = [
+        m for m in stable_history
+        if m["traded"] and not m["price_capped"]
+    ]
+
+    traded_prices = [
+        float(m["price"]) for m in traded_rows
+    ]
+
+    # 至少要有兩筆有效成交資料才能計算標準差
+    if len(traded_prices) < 2:
+        raise ValueError(
+            f"校準期有效成交資料不足：只有 {len(traded_prices)} 筆"
+        )
+
+    # 5. 計算均衡價格區間
+    band = band_from_prices(
+        traded_prices,
+        eq.k,
+        eq.min_half_width,
+    )
+
+    # 保留完整校準期的每日價格紀錄
+    all_prices = [float(m["price"]) for m in history]
+
+    return band, all_prices
