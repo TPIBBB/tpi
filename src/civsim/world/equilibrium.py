@@ -17,10 +17,12 @@ calibration_days 天，去掉前 burn_in_days 天，剩下的日子只取有實�
 
 from __future__ import annotations
 
+import copy
 import statistics
 from dataclasses import asdict, dataclass, replace
 
 from civsim.config import SimConfig
+from civsim.models import WorldState
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,31 @@ def calibration_config(config: SimConfig) -> SimConfig:
         ticks=eq.calibration_days,
         disasters=replace(config.disasters, count=0),
         government=replace(config.government, controller="none"),
+        equilibrium=replace(eq, start_converged=False),  # 校準期本身從初始世界開始
     )
+
+
+def converged_world(config: SimConfig) -> WorldState:
+    """校準期（沒有政府、沒有天災）跑完 burn_in_days 天後的世界：價格已收斂到均衡。
+
+    正式模擬從這個世界開始，每次天災後也調回這個狀態，穩定期一開始價格就在均衡區間附近。
+    平民的庫存、金錢、挨餓天數都是收斂後的值；回合、死亡數、價格上限、天災狀態歸零。
+    """
+    from civsim.world.engine import SimulationEngine  # 延後匯入，避免循環
+
+    engine = SimulationEngine(calibration_config(config), government=None, band=None)
+    for _ in range(config.equilibrium.burn_in_days):
+        engine.step()
+    world = copy.deepcopy(engine.world)
+    world.tick = 0
+    world.deaths = 0
+    world.phase = "stable"
+    world.disaster_id = None
+    world.food_multiplier = 1.0
+    world.market.price_cap = None
+    world.market.price_cap_until = None
+    world.market.orders = []
+    return world
 
 
 def calibrate(config: SimConfig) -> tuple[EquilibriumBand, list[float]]:

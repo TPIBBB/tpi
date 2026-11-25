@@ -10,7 +10,8 @@ from civsim.analysis.goals import evaluate_disaster, first_sustained
 from civsim.config import DisasterConfig, SocialRuleConfig
 from civsim.world import SimulationEngine
 from civsim.world.disasters import build_schedule
-from civsim.world.equilibrium import band_from_prices, calibrate
+from civsim.world.equilibrium import band_from_prices, calibrate, converged_world
+from civsim.world.setup import create_world
 from civsim.world.government import GovernmentActionType as T
 from civsim.world.government import GovernmentDecision
 
@@ -97,6 +98,27 @@ def test_calibration_fails_with_too_few_traded_days(small_config, monkeypatch):
 
     with pytest.raises(ValueError, match="有效成交資料不足"):
         calibrate(small_config)
+
+
+def test_world_starts_converged(small_config):
+    """每次穩定期（含天災後調回均衡狀態）一開始，價格就在均衡區間內，不用再從初始價格慢慢收斂。"""
+    engine = SimulationEngine(small_config, government=None)
+    world = engine.initial_world
+    assert world.tick == 0 and world.deaths == 0 and world.market.price_cap is None
+    assert engine.band.contains(world.market.price)
+    engine.run()
+    for d in engine.schedule:
+        first_days = engine.history[d.cycle_start:d.cycle_start + 3]
+        assert all(m["phase"] == "stable" and engine.band.contains(m["price"]) for m in first_days)
+
+
+def test_start_converged_false_uses_initial_world(small_config):
+    import random
+
+    cfg = replace(small_config, equilibrium=replace(small_config.equilibrium, start_converged=False))
+    engine = SimulationEngine(cfg, government=None, band=None)
+    assert engine.initial_world == create_world(cfg, random.Random(cfg.seed))
+    assert converged_world(small_config).market.price != engine.initial_world.market.price
 
 
 def test_reset_restores_initial_world_but_keeps_tick(small_config):

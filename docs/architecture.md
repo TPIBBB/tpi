@@ -140,8 +140,10 @@ C 組可能在記憶裡寫下「重置後約第 20 天會有天災」並提前�
 - 時間表與強度由 config 決定（`schedule_seed` 和平民的 `seed` 分開），與政府決策無關，所有條件都遇到相同的天災。
 - 每個 run 經歷多次天災，評估期不重疊。
 - **穩定期**是社會沒有經歷天災時的正常社會。長度在 `stable_days ± stable_jitter` 內隨機，政府才學不到天災的固定時間。
-- 每次評估期結束，不論價格是否恢復，引擎都把社會調回初始世界：人口、平民庫存、政府預算與儲備、市場全部重置，
-  近期決策與被拒絕的理由清空，只有政府記憶保留。
+- 模擬一開始與每次評估期結束（不論價格是否恢復），社會都在**均衡狀態**：校準期（沒有政府、沒有天災）跑完
+  `burn_in_days` 天、價格已收斂後的世界（`equilibrium.start_converged: true`，預設）。人口、平民庫存、政府預算與儲備、
+  市場全部重置成這個狀態，近期決策與被拒絕的理由清空，只有政府記憶保留。所以每次穩定期一開始價格就在均衡區間內。
+  設成 `false` 時改用初始世界（價格約 5.6，要約 10 天才收斂），11/22 以前的 run 都是這樣跑的。
 - 每次天災的強度（`food_multiplier`）、天災天數與評估期長度都相同，結果才能互相比較。
 
 ## 目標判定與實驗設計
@@ -190,7 +192,9 @@ world-api (api/server.py + api/government.py) ── 模擬引擎；平民在這
   政府 client（`gateway/client.py`，用 `python -m civsim govern` 啟動）輪詢 `GET /government/observation`。
   有記憶的組別在評估期結束時會停在 `awaiting_reflection`，等政府送來新版記憶（見 api.md）。
 - **基礎設施錯誤**（限流、逾時、驗證失敗）有上限地重試；仍然失敗就把整個 run 標記為無效，
-  不會默默變成 IDLE。
+  不會默默變成 IDLE。經過 digiRunner 時，驗證失敗分兩種處理：401（沒有 token 或 token 過期）會換一次 token 再送；
+  403（這個 client 沒有權限呼叫這條路徑）**不重試**，直接把 run 標記為無效，因為那是 digiRunner 的權限設定問題，
+  重試也不會變（見 [digirunner_setup.md](digirunner_setup.md)）。
 - 第一版一次只跑一個 run，但路徑預留 `run_id`（`/runs/{run_id}/government/...`），之後平行執行不必改路由。
 - 本機和遠端的政府都實作同一個 `GovernmentController` Protocol。
 

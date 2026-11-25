@@ -9,6 +9,13 @@ digiRunner 負責：路由、身分驗證、流量限制、存取紀錄。社會
 - 重試仍然失敗，或收到不該出現的錯誤（404、422、非重試造成的 409）→ 丟出 RunInvalid，整個 run 作廢
 - 絕對不默默改成 idle 繼續跑，否則實驗結果會被誤認成政府的決策
 
+身分驗證（digiRunner 的 Client Credentials，設定方式見 docs/digirunner_setup.md）：
+- 直連 world-api 時不需要驗證，永遠不會收到 401，也不會去申請 token
+- 經過 digiRunner 時，收到 401 就用 DIGIRUNNER_CLIENT_ID / DIGIRUNNER_CLIENT_SECRET 向 /oauth/token 換 token，
+  再送一次。一開始還沒有 token、或 token 過期（預設 1 天），都走同一條路
+- 帳密被拒絕、換到的 token 仍被拒絕、或收到 403（這個 client 沒有權限呼叫這條路徑）→ run 作廢
+- token 和密碼都不會出現在錯誤訊息裡
+
 LLM 本身的錯誤（格式錯誤、額度用完）不在這裡處理，由 agents/government.py 的 fallback 負責。
 
 負責人：digiRunner 整合組。
@@ -16,57 +23,93 @@ LLM 本身的錯誤（格式錯誤、額度用完）不在這裡處理，由 age
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from civsim.gateway.serialize import decision_to_dict, observation_from_dict
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+TOKEN_PATH = "/oauth/token"
 
 
 class RunInvalid(Exception):
     """這個 run 不能再用了：停止實驗，結果不能拿來分析。"""
 
 
+def basic_credentials(client_id: str, client_secret: str) -> str:
+    """digiRunner 申請 token 時 Basic 驗證的值：Base64(帳號 + ":" + Base64(密碼))。
+
+    注意密碼要先自己 Base64 一次，和一般的 HTTP Basic 不同（digiRunner 文件的 Client Credentials Mode）。
+    """
+    def b64(s: str) -> str:
+        return base64.b64encode(s.encode("utf-8")).decode("ascii")
+
+    return b64(f"{client_id}:{b64(client_secret)}")
+
+
+@dataclass(frozen=True)
+class ClientCredentials:
+    """digiRunner 的 client 帳密。密碼不會出現在 repr() 裡，避免被誤印出來。"""
+
+    client_id: str
+    client_secret: str = field(repr=False)
+
+    @classmethod
+    def from_env(cls) -> ClientCredentials | None:
+        """讀 DIGIRUNNER_CLIENT_ID / DIGIRUNNER_CLIENT_SECRET（civsim 啟動時會讀入 .env）；缺一個就回傳 None。"""
+        client_id = os.getenv("DIGIRUNNER_CLIENT_ID", "").strip()
+        client_secret = os.getenv("DIGIRUNNER_CLIENT_SECRET", "").strip()
+        return cls(client_id, client_secret) if client_id and client_secret else None
+
+
 class HttpWorldClient:
-    def __init__(self, base_url: str | None = None, token: str | None = None, run_id: str | None = None, *,
+    def __init__(self, base_url: str | None = None, run_id: str | None = None, *,
+                 credentials: ClientCredentials | None = None,
                  http=None, max_retries: int = 3, backoff: float = 1.0, timeout: float = 30,
                  sleep: Callable[[float], None] = time.sleep):
         """http：測試時可以傳入現成的 httpx.Client（例如 FastAPI 的 TestClient）。
         max_retries：失敗後最多再試幾次；第 n 次重試前等 backoff × 2^(n-1) 秒。
         run_id：不給就用 world-api 目前唯一的 run。
+        credentials：digiRunner 的 client 帳密，不給就讀環境變數；直連 world-api 時用不到。
         """
         import httpx  # 選用相依：uv sync --extra api
 
         self._httpx = httpx
         base_url = (base_url or os.getenv("DIGIRUNNER_BASE_URL", "http://localhost:8000")).rstrip("/")
-        token = token or os.getenv("DIGIRUNNER_CLIENT_TOKEN", "")
-        # TODO(digiRunner 整合組)：依 digiRunner 的驗證方式調整 header（OAuth token、API key…）
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        self._credentials = credentials or ClientCredentials.from_env()
+        self._token = ""  # 第一次收到 401 時才去申請
         if http is None:
-            http = httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
-        else:
-            http.headers.update(headers)
+            http = httpx.Client(base_url=base_url, timeout=timeout)
         self.http = http
         self.max_retries = max_retries
         self.backoff = backoff
         self.sleep = sleep
         self.recovered = 0  # 逾時後重送、但其實第一次已經送到的次數
+        self.token_requests = 0  # 向 digiRunner 申請 token 的次數
 
         self.run_id = run_id or self._only_run()
         self.http.headers["X-Run-Id"] = self.run_id  # 讓 digiRunner 的存取紀錄能對應到模擬紀錄
 
+    @property
+    def client_id(self) -> str:
+        return self._credentials.client_id if self._credentials else ""
+
     # ---- HTTP ----
-    def _request(self, method: str, path: str, **kwargs) -> tuple[Any, int]:
-        """回傳 (response, 重試了幾次)。基礎設施錯誤會重試，重試完仍失敗就丟出 RunInvalid。"""
+    def _send(self, method: str, path: str, *, auth: bool = True, **kwargs) -> tuple[Any, int]:
+        """送一次請求，基礎設施錯誤會重試。回傳 (response, 重試了幾次)，重試完仍失敗就丟出 RunInvalid。"""
+        headers = dict(kwargs.pop("headers", None) or {})
         last = ""
         for attempt in range(self.max_retries + 1):
             if attempt:
                 self.sleep(self.backoff * 2 ** (attempt - 1))
+            if auth and self._token:
+                headers["Authorization"] = f"Bearer {self._token}"  # 每次重新帶，token 可能剛換過
             try:
-                r = self.http.request(method, path, **kwargs)
+                r = self.http.request(method, path, headers=headers, **kwargs)
             except self._httpx.TransportError as e:  # 連線失敗、逾時
                 last = f"{type(e).__name__}: {e}"
                 continue
@@ -74,6 +117,46 @@ class HttpWorldClient:
                 return r, attempt
             last = f"HTTP {r.status_code}"
         raise RunInvalid(f"{method} {path} 重試 {self.max_retries} 次仍然失敗（{last}）")
+
+    def _request(self, method: str, path: str, **kwargs) -> tuple[Any, int]:
+        """回傳 (response, 重試了幾次)。收到 401 會換 token 再送一次；403 代表沒有權限，run 作廢。
+
+        換 token 前後的重試次數會加總：只要曾經重送，submit() 就會用 409 判斷第一次是否其實已經送到。
+        """
+        r, retries = self._send(method, path, **kwargs)
+        if r.status_code == 401:
+            self._refresh_token()
+            r, more = self._send(method, path, **kwargs)
+            retries += more
+            if r.status_code == 401:
+                raise RunInvalid(f"{method} {path}：剛向 digiRunner 換到的 token 仍被拒絕（401）")
+        if r.status_code == 403:
+            who = self.client_id or "（未設定 client）"
+            raise RunInvalid(f"{method} {path}：digiRunner 拒絕 client {who} 呼叫這條路徑（403），"
+                             "請檢查這個 client 被授權的群組")
+        return r, retries
+
+    def _refresh_token(self) -> None:
+        """用 client 帳密向 digiRunner 換新的 access token。"""
+        creds = self._credentials
+        if creds is None:
+            raise RunInvalid("digiRunner 要求身分驗證（401），但沒有設定 DIGIRUNNER_CLIENT_ID / DIGIRUNNER_CLIENT_SECRET")
+        self.token_requests += 1
+        r, _ = self._send("POST", TOKEN_PATH, auth=False,
+                          headers={"Authorization": f"Basic {basic_credentials(creds.client_id, creds.client_secret)}"},
+                          data={"grant_type": "client_credentials"})
+        if r.status_code == 401:
+            raise RunInvalid(f"digiRunner 拒絕 client {creds.client_id} 的帳密（401），請檢查 .env 的帳號密碼")
+        if r.status_code >= 400:
+            raise RunInvalid(f"向 digiRunner 申請 token 失敗：HTTP {r.status_code}")
+        try:
+            body = r.json()
+        except ValueError:  # 例如 digiRunner 回了 HTML 錯誤頁
+            raise RunInvalid(f"digiRunner 的 token 回應不是 JSON（HTTP {r.status_code}）") from None
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if not token:
+            raise RunInvalid("digiRunner 的 token 回應裡沒有 access_token")
+        self._token = token
 
     @staticmethod
     def _json(r) -> Any:
@@ -172,7 +255,8 @@ def run_government(client: HttpWorldClient, controller,
             if on_reflect:
                 on_reflect(report, result)
         elif status == "finished":
-            return {"run_id": client.run_id, "days": days, "reflections": reflections, "recovered": client.recovered}
+            return {"run_id": client.run_id, "days": days, "reflections": reflections,
+                    "recovered": client.recovered, "token_requests": client.token_requests}
         else:
             raise RunInvalid(f"不認得的狀態 {status!r}")
         status = result["status"]
