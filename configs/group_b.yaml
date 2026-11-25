@@ -1,5 +1,4 @@
 # B 組：LLM 政府、有記憶、不向政府揭露社會規則（試跑：只跑 1 次天災）
-# 除了 name、government.controller、government.memory、disasters.count，其他都和 baseline.yaml 相同，A、C 組才能比較。
 name: group_b
 seed: 42
 population: {producer_trader: 10, producer_self: 5, consumer: 20, dependent: 5}
