@@ -1,4 +1,4 @@
-import type { EquilibriumBand, SimEvent, TickMetrics, WorldState } from "./types";
+import type { DisasterReport, EquilibriumBand, SimEvent, TickMetrics, WorldState } from "./types";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
@@ -39,12 +39,12 @@ export async function listRuns(): Promise<PublishedRun[]> {
   return JSON.parse(await getStatic("runs/index.json")) as PublishedRun[];
 }
 
-export async function loadRun(id: string): Promise<{ metrics: TickMetrics[]; band: EquilibriumBand | null }> {
+export async function loadRun(id: string,): Promise<{ metrics: TickMetrics[]; band: EquilibriumBand | null; reports: DisasterReport[] }> {
   const [metrics, disasters] = await Promise.all([
     getStatic(`runs/${id}/metrics.jsonl`),
     getStatic(`runs/${id}/disasters.jsonl`),
   ]);
   // 均衡區間在 run 開始時算一次，每次天災報告裡都一樣，取第一筆
-  const reports = parseJsonl<{ band?: EquilibriumBand }>(disasters);
-  return { metrics: parseJsonl<TickMetrics>(metrics), band: reports[0]?.band ?? null };
+  const reports = parseJsonl<DisasterReport>(disasters);
+  return { metrics: parseJsonl<TickMetrics>(metrics), band: reports[0]?.band ?? null, reports };
 }
