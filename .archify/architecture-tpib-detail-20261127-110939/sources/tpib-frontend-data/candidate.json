@@ -1,0 +1,576 @@
+{
+  "schema_version": 1,
+  "diagram_type": "class",
+  "meta": {
+    "title": "TPIB 前端資料結構｜React 與 world-api 契約",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-tpib-detail-20261127-110939/tpib-frontend-data.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/TPIBBB/tpi.git",
+      "revision": "b1ada53484565debb029139ba289a779d47c8af8",
+      "provider": "github"
+    }
+  },
+  "layout": {
+    "mode": "grid",
+    "typeW": 230,
+    "typeMaxW": 285,
+    "gapX": 75,
+    "gapY": 80
+  },
+  "types": [
+    {
+      "id": "events",
+      "label": "SimEvent",
+      "kind": "interface",
+      "sublabel": "GET /world/events 的陣列元素",
+      "row": 0,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "number"
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "actor",
+          "type": "string | null"
+        },
+        {
+          "name": "success",
+          "type": "boolean"
+        },
+        {
+          "name": "payload",
+          "type": "Record<string, unknown>"
+        },
+        {
+          "name": "message",
+          "type": "string"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 69,
+          "end_line": 76,
+          "label": "前端事件介面"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 76,
+          "end_line": 78,
+          "label": "事件序列化與 since_tick"
+        },
+        {
+          "path": "frontend/src/components/EventTimeline.tsx",
+          "line": 3,
+          "end_line": 15,
+          "label": "取最近 50 筆並反向呈現"
+        }
+      ]
+    },
+    {
+      "id": "hook",
+      "label": "useWorld 回傳值",
+      "kind": "record",
+      "sublabel": "React state 與回傳介面",
+      "row": 0,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "state",
+          "type": "WorldState | null"
+        },
+        {
+          "name": "metrics",
+          "type": "TickMetrics[]"
+        },
+        {
+          "name": "events",
+          "type": "SimEvent[]"
+        },
+        {
+          "name": "error",
+          "type": "string | null"
+        },
+        {
+          "name": "setMetrics",
+          "type": "React state setter"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/useWorld.ts",
+          "line": 5,
+          "end_line": 37,
+          "label": "狀態初始化、輪詢與回傳"
+        }
+      ]
+    },
+    {
+      "id": "metrics",
+      "label": "TickMetrics",
+      "kind": "interface",
+      "sublabel": "GET /world/metrics 與 JSONL 每列",
+      "row": 0,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "number"
+        },
+        {
+          "name": "day",
+          "type": "number"
+        },
+        {
+          "name": "disaster_id",
+          "type": "number | null"
+        },
+        {
+          "name": "phase",
+          "type": "Phase"
+        },
+        {
+          "name": "food_multiplier",
+          "type": "number"
+        },
+        {
+          "name": "price",
+          "type": "number"
+        },
+        {
+          "name": "traded",
+          "type": "boolean"
+        },
+        {
+          "name": "volume",
+          "type": "number"
+        },
+        {
+          "name": "demand",
+          "type": "number"
+        },
+        {
+          "name": "supply",
+          "type": "number"
+        },
+        {
+          "name": "price_capped",
+          "type": "boolean"
+        },
+        {
+          "name": "customary_price",
+          "type": "number"
+        },
+        {
+          "name": "alive",
+          "type": "number"
+        },
+        {
+          "name": "hungry",
+          "type": "number"
+        },
+        {
+          "name": "deaths",
+          "type": "number"
+        },
+        {
+          "name": "citizen_food",
+          "type": "number"
+        },
+        {
+          "name": "citizen_money",
+          "type": "number"
+        },
+        {
+          "name": "money_gini",
+          "type": "number"
+        },
+        {
+          "name": "gov_budget",
+          "type": "number"
+        },
+        {
+          "name": "gov_reserve",
+          "type": "number"
+        },
+        {
+          "name": "gov_accepted",
+          "type": "number"
+        },
+        {
+          "name": "gov_rejected",
+          "type": "number"
+        },
+        {
+          "name": "rejected_actions",
+          "type": "number"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 43,
+          "end_line": 67,
+          "label": "前端指標介面的全部欄位"
+        },
+        {
+          "path": "backend/src/civsim/analysis/metrics.py",
+          "line": 21,
+          "end_line": 54,
+          "label": "後端計算指標欄位"
+        },
+        {
+          "path": "frontend/src/api/client.ts",
+          "line": 42,
+          "end_line": 49,
+          "label": "靜態檔使用同一介面"
+        }
+      ]
+    },
+    {
+      "id": "phase",
+      "label": "Phase",
+      "kind": "enum",
+      "sublabel": "階段字串聯集",
+      "row": 1,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "stable",
+          "type": "string"
+        },
+        {
+          "name": "disaster",
+          "type": "string"
+        },
+        {
+          "name": "evaluation",
+          "type": "string"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 4,
+          "end_line": 5,
+          "label": "前端字串聯集"
+        },
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 78,
+          "end_line": 82,
+          "label": "介面階段顯示名稱"
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "label": "WorldState",
+      "kind": "interface",
+      "sublabel": "GET /world/state 的 JSON",
+      "row": 1,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "number"
+        },
+        {
+          "name": "phase",
+          "type": "Phase"
+        },
+        {
+          "name": "disaster_id",
+          "type": "number | null"
+        },
+        {
+          "name": "market",
+          "type": "內嵌市場物件"
+        },
+        {
+          "name": "government",
+          "type": "內嵌政府物件"
+        },
+        {
+          "name": "band",
+          "type": "EquilibriumBand | null"
+        },
+        {
+          "name": "citizens",
+          "type": "CitizenView[]"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 25,
+          "end_line": 41,
+          "label": "前端世界狀態契約"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 54,
+          "end_line": 70,
+          "label": "選取並投影引擎欄位"
+        },
+        {
+          "path": "frontend/src/App.tsx",
+          "line": 101,
+          "end_line": 109,
+          "label": "市場與居民的資料來源"
+        }
+      ]
+    },
+    {
+      "id": "gov-view",
+      "label": "government",
+      "kind": "record",
+      "sublabel": "WorldState 內嵌政府物件",
+      "row": 1,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "budget",
+          "type": "number"
+        },
+        {
+          "name": "food_reserve",
+          "type": "number"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 35,
+          "end_line": 38,
+          "label": "政府的兩項數值"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 54,
+          "end_line": 69,
+          "label": "從政府 dataclass 產生 JSON"
+        }
+      ]
+    },
+    {
+      "id": "citizen-view",
+      "label": "CitizenView",
+      "kind": "interface",
+      "sublabel": "居民的唯讀欄位",
+      "row": 2,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "type": "CitizenType"
+        },
+        {
+          "name": "alive",
+          "type": "boolean"
+        },
+        {
+          "name": "food",
+          "type": "number"
+        },
+        {
+          "name": "money",
+          "type": "number"
+        },
+        {
+          "name": "hungry_days",
+          "type": "number"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 4,
+          "end_line": 14,
+          "label": "居民種類與介面欄位"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 65,
+          "end_line": 69,
+          "label": "由 ID 字典轉成居民陣列"
+        }
+      ]
+    },
+    {
+      "id": "band",
+      "label": "EquilibriumBand",
+      "kind": "interface",
+      "sublabel": "均衡區間的統計欄位",
+      "row": 2,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "mean",
+          "type": "number"
+        },
+        {
+          "name": "std",
+          "type": "number"
+        },
+        {
+          "name": "low",
+          "type": "number"
+        },
+        {
+          "name": "high",
+          "type": "number"
+        },
+        {
+          "name": "k",
+          "type": "number"
+        },
+        {
+          "name": "samples",
+          "type": "number"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 16,
+          "end_line": 23,
+          "label": "均衡帶介面"
+        },
+        {
+          "path": "frontend/src/components/PriceChart.tsx",
+          "line": 25,
+          "end_line": 45,
+          "label": "糧價圖中的均衡帶與天災區間"
+        }
+      ]
+    },
+    {
+      "id": "market-view",
+      "label": "market",
+      "kind": "record",
+      "sublabel": "WorldState 內嵌市場物件",
+      "row": 2,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "price",
+          "type": "number"
+        },
+        {
+          "name": "customary_price",
+          "type": "number"
+        },
+        {
+          "name": "price_cap",
+          "type": "number | null"
+        },
+        {
+          "name": "price_cap_until",
+          "type": "number | null"
+        }
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/api/types.ts",
+          "line": 29,
+          "end_line": 34,
+          "label": "市場欄位"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 54,
+          "end_line": 69,
+          "label": "API 投影市場的四個數值"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "hook-events",
+      "from": "hook",
+      "to": "events",
+      "kind": "association"
+    },
+    {
+      "id": "hook-metrics",
+      "from": "hook",
+      "to": "metrics",
+      "kind": "association"
+    },
+    {
+      "id": "hook-state",
+      "from": "hook",
+      "to": "state",
+      "kind": "association"
+    },
+    {
+      "id": "state-phase",
+      "from": "state",
+      "to": "phase",
+      "kind": "association"
+    },
+    {
+      "id": "state-gov-view",
+      "from": "state",
+      "to": "gov-view",
+      "kind": "composition"
+    },
+    {
+      "id": "state-citizen-view",
+      "from": "state",
+      "to": "citizen-view",
+      "kind": "composition"
+    },
+    {
+      "id": "state-band",
+      "from": "state",
+      "to": "band",
+      "kind": "composition"
+    },
+    {
+      "id": "state-market-view",
+      "from": "state",
+      "to": "market-view",
+      "kind": "composition"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端如何使用資料",
+      "items": [
+        "即時模式以 Promise.all 讀取 state、metrics、events。成功後更新三個 state，失敗保留原有資料並寫入 error。狀態與事件只在即時模式顯示。",
+        "MarketPanel 接收 WorldState；AgentTable 接收 CitizenView[]；EventTimeline 接收 SimEvent[]。PriceChart 使用 TickMetrics[] 的 tick、price、phase、disaster_id，並以 band.low／high 畫均衡區間。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "靜態與本機資料",
+      "items": [
+        "runs/index.json 為 PublishedRun[]，每筆有 id、label。選定實驗後，metrics.jsonl 逐行解析為 TickMetrics[]；從 disasters.jsonl 第一筆取 band。",
+        "本機匯入也使用 TickMetrics[]，不附帶均衡帶。HTTP JSON 與 JSONL 透過 TypeScript 型別斷言使用，程式沒有逐欄執行期驗證。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "欄位對接差異",
+      "items": [
+        "後端指標另有 avg_citizen_food、food_gini；校準出均衡帶時還加入 in_band。這三個欄位目前未列在前端 TickMetrics 介面。",
+        "CitizenType 的四種值是 producer_trader、producer_self、consumer、dependent。GET /world/disasters 雖由 API 提供，但當前 React 輪詢未呼叫。"
+      ]
+    }
+  ]
+}

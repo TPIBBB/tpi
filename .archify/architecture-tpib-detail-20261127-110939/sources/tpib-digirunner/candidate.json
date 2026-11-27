@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "TPIB digiRunner｜OAuth 取權杖與政府 API 轉發",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-tpib-detail-20261127-110939/tpib-digirunner.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/TPIBBB/tpi.git",
+      "revision": "b1ada53484565debb029139ba289a779d47c8af8",
+      "provider": "github"
+    }
+  },
+  "participants": [
+    {
+      "id": "government",
+      "type": "backend",
+      "label": "政府客戶端",
+      "sublabel": "civsim govern",
+      "sources": [
+        {
+          "path": "backend/src/civsim/gateway/client.py",
+          "line": 69,
+          "end_line": 95,
+          "label": "base URL、權杖與 run ID"
+        },
+        {
+          "path": "backend/src/civsim/gateway/client.py",
+          "line": 102,
+          "end_line": 159,
+          "label": "重試與 OAuth 實作"
+        },
+        {
+          "path": "backend/src/civsim/gateway/client.py",
+          "line": 174,
+          "end_line": 221,
+          "label": "政府請求與重送確認"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "digiRunner",
+      "sublabel": "127.0.0.1:31080",
+      "sources": [
+        {
+          "path": "backend/docs/digirunner_setup.md",
+          "line": 68,
+          "end_line": 107,
+          "label": "dgrc 路徑及群組範圍"
+        },
+        {
+          "path": "backend/docs/digirunner_setup.md",
+          "line": 172,
+          "end_line": 191,
+          "label": "client 綁定與 OAuth 設定"
+        },
+        {
+          "path": "backend/deploy/digirunner/world-api-apis.json",
+          "line": 65,
+          "end_line": 105,
+          "label": "政府觀察的轉發規則"
+        }
+      ]
+    },
+    {
+      "id": "world-api",
+      "type": "backend",
+      "label": "world-api",
+      "sublabel": "FastAPI :8000",
+      "sources": [
+        {
+          "path": "backend/src/civsim/api/government.py",
+          "line": 99,
+          "end_line": 125,
+          "label": "狀態、run 與權限分工"
+        },
+        {
+          "path": "backend/src/civsim/api/government.py",
+          "line": 127,
+          "end_line": 164,
+          "label": "觀察與每日決策驗證"
+        },
+        {
+          "path": "backend/src/civsim/api/government.py",
+          "line": 166,
+          "end_line": 187,
+          "label": "反思及記憶提交"
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 330,
+      "label": "連上閘道並取得權杖"
+    },
+    {
+      "from": 348,
+      "to": 704,
+      "label": "已授權的政府請求"
+    },
+    {
+      "from": 728,
+      "to": 836,
+      "label": "權限測試示例"
+    }
+  ],
+  "messages": [
+    {
+      "id": "initial",
+      "from": "government",
+      "to": "gateway",
+      "y": 160,
+      "label": "GET /runs",
+      "variant": "default"
+    },
+    {
+      "id": "unauth",
+      "from": "gateway",
+      "to": "government",
+      "y": 191,
+      "label": "401 Unauthorized",
+      "variant": "return"
+    },
+    {
+      "id": "token",
+      "from": "government",
+      "to": "gateway",
+      "y": 222,
+      "label": "POST /oauth/token",
+      "variant": "security"
+    },
+    {
+      "id": "access",
+      "from": "gateway",
+      "to": "government",
+      "y": 253,
+      "label": "access_token",
+      "variant": "return"
+    },
+    {
+      "id": "retry",
+      "from": "government",
+      "to": "gateway",
+      "y": 284,
+      "label": "重送 GET /runs",
+      "variant": "security",
+      "note": "後續 API 請求重用 Bearer token；收到 401 時重新申請。"
+    },
+    {
+      "id": "runs-forward",
+      "from": "gateway",
+      "to": "world-api",
+      "y": 360,
+      "label": "轉發 GET /runs",
+      "variant": "default"
+    },
+    {
+      "id": "runs-back",
+      "from": "world-api",
+      "to": "gateway",
+      "y": 390,
+      "label": "run 清單",
+      "variant": "return"
+    },
+    {
+      "id": "runs-delivered",
+      "from": "gateway",
+      "to": "government",
+      "y": 420,
+      "label": "run 清單",
+      "variant": "return"
+    },
+    {
+      "id": "observe",
+      "from": "government",
+      "to": "gateway",
+      "y": 450,
+      "label": "GET observation",
+      "variant": "emphasis"
+    },
+    {
+      "id": "observe-forward",
+      "from": "gateway",
+      "to": "world-api",
+      "y": 480,
+      "label": "轉發 observation",
+      "variant": "default"
+    },
+    {
+      "id": "observe-response",
+      "from": "world-api",
+      "to": "gateway",
+      "y": 510,
+      "label": "observation JSON",
+      "variant": "return"
+    },
+    {
+      "id": "observe-delivered",
+      "from": "gateway",
+      "to": "government",
+      "y": 540,
+      "label": "政府觀察",
+      "variant": "return"
+    },
+    {
+      "id": "submit",
+      "from": "government",
+      "to": "gateway",
+      "y": 570,
+      "label": "POST decisions",
+      "variant": "emphasis"
+    },
+    {
+      "id": "forward-submit",
+      "from": "gateway",
+      "to": "world-api",
+      "y": 600,
+      "label": "驗證後轉發",
+      "variant": "security"
+    },
+    {
+      "id": "decision-response",
+      "from": "world-api",
+      "to": "gateway",
+      "y": 632,
+      "label": "結算與狀態",
+      "variant": "return"
+    },
+    {
+      "id": "decision-delivered",
+      "from": "gateway",
+      "to": "government",
+      "y": 664,
+      "label": "決策結果",
+      "variant": "return"
+    },
+    {
+      "id": "deny-request",
+      "from": "government",
+      "to": "gateway",
+      "y": 740,
+      "label": "GET /world/disasters",
+      "variant": "default"
+    },
+    {
+      "id": "deny",
+      "from": "gateway",
+      "to": "government",
+      "y": 772,
+      "label": "403 Forbidden",
+      "variant": "return",
+      "note": "gov-group 無此路徑。請求停在閘道，政府客戶端停止本次 run。"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "如何接入",
+      "items": [
+        "政府啟動時以 --base-url 優先，其次 DIGIRUNNER_BASE_URL，最後回到 http://localhost:8000。指向 http://localhost:31080 時才經閘道。",
+        "Docker 將 127.0.0.1:31080 對應到容器 :18080。dgrc 匯入規則使用 {p} 代入 run ID，保留原路徑轉發到 host.docker.internal:8000。依專案設定文件，九條路徑均要求 OAuth、且不快取。"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "OAuth 與路徑權限",
+      "items": [
+        "401 後以 DIGIRUNNER_CLIENT_ID／DIGIRUNNER_CLIENT_SECRET 呼叫 token 端點，以 Basic 與 grant_type=client_credentials 換 access_token，再帶 Authorization: Bearer。專案設定文件指定權杖效期 1 天。",
+        "gov-group：GET /runs、GET observation、POST decisions、GET reflections、POST memory。後四條在 /runs/{p}/government/。frontend-group：GET /runs 與 GET /world/{state,metrics,events,disasters}。",
+        "前端群組是文件中配置的測試帳號權限。目前 React 的 fetch 不附加 OAuth token，GitHub Pages 讀取靜態 JSONL。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "誰有權處理資料",
+      "items": [
+        "閘道決定此 client 可否呼叫路徑。world-api 驗證 run ID、run 狀態及決策 tick，回傳結算摘要，並由引擎評估每個行動。評估期末也經同一閘道 GET reflections、POST memory。",
+        "403、帳密或換 token 失敗會終止 run。429、500、502、503、504 與傳輸失敗依退避重試；重送決策／記憶得到 409 時，先讀 run 狀態來確認上次是否已套用。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "可觀測性與證據",
+      "items": [
+        "政府客戶端取得 run ID 後加入 X-Run-Id。專案文件仍標示閘道轉發此標頭及寫入存取紀錄尚未驗證。",
+        "此圖依程式碼與專案配置繪製。digiRunner 的 401／403、權限與限流另有 deploy/digirunner/check_auth.ps1 或 .sh 可檢查。"
+      ]
+    }
+  ]
+}

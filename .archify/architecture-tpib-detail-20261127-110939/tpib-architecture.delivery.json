@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "6e4b9f7a-475d-40f4-9ac3-6cfcbe7522d9",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\GitHub\\tpiB merge\\.archify\\architecture-tpib-detail-20261127-110939\\sources\\tpib-architecture\\candidate.json",
+  "output": "C:\\GitHub\\tpiB merge\\.archify\\architecture-tpib-detail-20261127-110939\\tpib-architecture.html",
+  "specification": {
+    "sha256": "a1f965dc87c2304572e9a75e1f7e146241ec8e2a7c22047c51e6a14c46e15e98",
+    "bytes": 11859
+  },
+  "artifact": {
+    "sha256": "f3b3e164294287e15a5eb694590fa9ce933c8d15c84cf39b5e94eb87087f5c45",
+    "bytes": 868519
+  }
+}

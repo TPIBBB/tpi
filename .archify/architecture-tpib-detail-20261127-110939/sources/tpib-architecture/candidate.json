@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TPIB 文明模擬器｜前後端架構",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-tpib-detail-20261127-110939/tpib-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/TPIBBB/tpi.git",
+      "revision": "b1ada53484565debb029139ba289a779d47c8af8",
+      "provider": "github"
+    },
+    "views": [
+      {
+        "id": "live",
+        "label": "前端即時資料",
+        "focus": [
+          "viewer",
+          "web-ui",
+          "world-api",
+          "simulation"
+        ],
+        "note": "瀏覽器唯讀輪詢。API 從引擎狀態、指標歷史及事件紀錄產生 JSON。"
+      },
+      {
+        "id": "history",
+        "label": "靜態與離線資料",
+        "focus": [
+          "web-ui",
+          "published-runs",
+          "run-logs"
+        ],
+        "note": "GitHub Pages 使用隨前端發布的實驗檔。單機實驗的 metrics.jsonl 也可手動匯入。"
+      },
+      {
+        "id": "remote",
+        "label": "政府與 digiRunner",
+        "focus": [
+          "government",
+          "gateway",
+          "world-api",
+          "simulation",
+          "model"
+        ],
+        "note": "政府可直連或經閘道。world-api 檢查 run 與 tick，模擬引擎負責決策驗證、結算和反思。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "viewer",
+      "type": "external",
+      "label": "使用者",
+      "sublabel": "瀏覽器",
+      "pos": [
+        40,
+        48
+      ],
+      "size": [
+        115,
+        68
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/App.tsx",
+          "line": 67,
+          "end_line": 95,
+          "label": "模式切換與檔案匯入"
+        }
+      ],
+      "icon": "person"
+    },
+    {
+      "id": "web-ui",
+      "type": "frontend",
+      "label": "視覺化前端",
+      "sublabel": "React UI · useWorld · API Client",
+      "pos": [
+        241,
+        48
+      ],
+      "size": [
+        195,
+        68
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/App.tsx",
+          "line": 11,
+          "end_line": 55,
+          "label": "即時、靜態與離線切換"
+        },
+        {
+          "path": "frontend/src/useWorld.ts",
+          "line": 5,
+          "end_line": 35,
+          "label": "每兩秒輪詢三個端點"
+        },
+        {
+          "path": "frontend/src/api/client.ts",
+          "line": 3,
+          "end_line": 14,
+          "label": "GET 請求與 API 位址"
+        }
+      ]
+    },
+    {
+      "id": "world-api",
+      "type": "backend",
+      "label": "world-api",
+      "sublabel": "/world/* · /runs/*",
+      "pos": [
+        579,
+        48
+      ],
+      "size": [
+        190,
+        68
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/cli.py",
+          "line": 56,
+          "end_line": 65,
+          "label": "啟動 API 與模擬引擎"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 40,
+          "end_line": 78,
+          "label": "CORS、唯讀端點與記憶體事件"
+        },
+        {
+          "path": "backend/src/civsim/api/government.py",
+          "line": 99,
+          "end_line": 187,
+          "label": "政府端點、回合驗證與反思鎖"
+        }
+      ]
+    },
+    {
+      "id": "simulation",
+      "type": "backend",
+      "label": "文明模擬引擎",
+      "sublabel": "WorldState · history · schedule",
+      "pos": [
+        903,
+        48
+      ],
+      "size": [
+        205,
+        68
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 51,
+          "end_line": 87,
+          "label": "世界、天災排程與記憶體歷史"
+        },
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 168,
+          "end_line": 231,
+          "label": "每日結算與紀錄呼叫"
+        },
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 267,
+          "end_line": 294,
+          "label": "評估期結束與反思後重置"
+        }
+      ]
+    },
+    {
+      "id": "published-runs",
+      "type": "database",
+      "label": "已發布實驗檔",
+      "sublabel": "index.json · JSONL",
+      "pos": [
+        241,
+        247
+      ],
+      "size": [
+        195,
+        68
+      ],
+      "sources": [
+        {
+          "path": "frontend/public/runs/index.json",
+          "line": 1,
+          "end_line": 4,
+          "label": "已發布實驗索引"
+        },
+        {
+          "path": "frontend/src/api/client.ts",
+          "line": 31,
+          "end_line": 49,
+          "label": "靜態索引、指標與天災報告"
+        },
+        {
+          "path": ".github/workflows/pages.yml",
+          "line": 33,
+          "end_line": 39,
+          "label": "GitHub Pages 靜態建置"
+        }
+      ]
+    },
+    {
+      "id": "government",
+      "type": "backend",
+      "label": "政府控制器",
+      "sublabel": "HttpWorldClient · none／LLM",
+      "pos": [
+        579,
+        291
+      ],
+      "size": [
+        190,
+        68
+      ],
+      "sources": [
+        {
+          "path": "start-all.ps1",
+          "line": 30,
+          "end_line": 41,
+          "label": "啟動腳本強制本機直連"
+        },
+        {
+          "path": "backend/src/civsim/gateway/client.py",
+          "line": 69,
+          "end_line": 159,
+          "label": "位址優先序、OAuth 與重試"
+        },
+        {
+          "path": "backend/src/civsim/gateway/client.py",
+          "line": 229,
+          "end_line": 262,
+          "label": "觀察、決策與反思的 HTTP 迴圈"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "digiRunner",
+      "sublabel": "Docker :31080 · OAuth2",
+      "pos": [
+        846,
+        201
+      ],
+      "size": [
+        150,
+        68
+      ],
+      "sources": [
+        {
+          "path": "backend/deploy/digirunner/world-api-apis.json",
+          "line": 65,
+          "end_line": 105,
+          "label": "dgrc 路徑映射與不快取設定"
+        },
+        {
+          "path": "backend/docs/digirunner_setup.md",
+          "line": 68,
+          "end_line": 107,
+          "label": "API 註冊與路徑群組"
+        },
+        {
+          "path": "backend/docker-compose.yml",
+          "line": 45,
+          "end_line": 64,
+          "label": "主機埠、轉發位址與設定持久化"
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "type": "external",
+      "label": "LLM 供應端",
+      "sublabel": "依 LLM_PROVIDER 選擇",
+      "pos": [
+        579,
+        464
+      ],
+      "size": [
+        190,
+        68
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/agents/llm_client.py",
+          "line": 296,
+          "end_line": 324,
+          "label": "Gemini、Vertex 與 OpenAI 相容供應端"
+        }
+      ]
+    },
+    {
+      "id": "run-logs",
+      "type": "database",
+      "label": "研究實驗紀錄",
+      "sublabel": "本機 runs/ · JSONL",
+      "pos": [
+        903,
+        420
+      ],
+      "size": [
+        205,
+        68
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/cli.py",
+          "line": 27,
+          "end_line": 43,
+          "label": "單次模擬的輸出路徑"
+        },
+        {
+          "path": "backend/src/civsim/experiments/runner.py",
+          "line": 43,
+          "end_line": 51,
+          "label": "CLI 注入 JSONL Recorder"
+        },
+        {
+          "path": "backend/src/civsim/storage/recorder.py",
+          "line": 42,
+          "end_line": 80,
+          "label": "寫入指標、事件、報告、記憶與模型紀錄"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "viewer-web",
+      "from": "viewer",
+      "to": "web-ui",
+      "label": "瀏覽"
+    },
+    {
+      "id": "ui-world",
+      "from": "web-ui",
+      "to": "world-api",
+      "label": "即時 GET／2 秒",
+      "variant": "emphasis"
+    },
+    {
+      "id": "world-engine",
+      "from": "world-api",
+      "to": "simulation",
+      "label": "查詢與推進",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-published",
+      "from": "web-ui",
+      "to": "published-runs",
+      "label": "讀取靜態檔"
+    },
+    {
+      "id": "government-direct",
+      "from": "government",
+      "to": "world-api",
+      "label": "本機直連"
+    },
+    {
+      "id": "government-gateway",
+      "from": "government",
+      "to": "gateway",
+      "label": "選配 OAuth",
+      "variant": "security"
+    },
+    {
+      "id": "gateway-world",
+      "from": "gateway",
+      "to": "world-api",
+      "label": "轉發 /runs/*",
+      "variant": "security"
+    },
+    {
+      "id": "government-model",
+      "from": "government",
+      "to": "model",
+      "label": "LLM 模式"
+    },
+    {
+      "id": "simulation-records",
+      "from": "simulation",
+      "to": "run-logs",
+      "label": "CLI 寫入 JSONL"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "即時前端與 JSON 契約",
+      "items": [
+        "`App` → `useWorld` → `api`，每 2 秒並行 GET `/world/state`、`/world/metrics`、`/world/events`。資料放在 React state：`WorldState | null`、`TickMetrics[]`、`SimEvent[]`。",
+        "市場面板與居民表讀 `WorldState`／`CitizenView[]`；糧價圖及指標表讀 `TickMetrics[]`；事件時間軸顯示最近 50 筆 `SimEvent`。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "靜態與離線資料",
+      "items": [
+        "GitHub Pages 以 `VITE_STATIC=1` 建置，讀取 `runs/index.json` 及 `runs/{id}/metrics.jsonl`、`disasters.jsonl`。圖表使用第一筆天災報告的 `band`。",
+        "本機匯入 `metrics.jsonl` 時只更新指標並清空離線均衡帶。選取已發布 run、匯入本機檔，或靜態建置時停用即時輪詢。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "後端狀態與回合",
+      "items": [
+        "`SimulationEngine` 內有 `WorldState`（居民以 ID 作鍵、市場掛單、政府資產）、指標歷史、天災排程及反思記憶；API 另持有事件列表。",
+        "政府 `POST /runs/{rid}/government/decisions` 通過 run、狀態與 tick 檢查才執行結算；啟用遠端記憶的評估期末，提交 `memory` 後才重置並完成當日。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "digiRunner 的運行位置",
+      "items": [
+        "Docker 綁定 `127.0.0.1:31080`，容器內 `:18080`，依 dgrc 登錄路徑轉發到 `host.docker.internal:8000`。閘道驗證 Bearer token，按群組放行。",
+        "`start-all.ps1` 讓政府直連。將 `civsim govern --base-url` 或 `DIGIRUNNER_BASE_URL` 指向 `http://localhost:31080` 才走閘道；React 即時請求沒有接入此 OAuth 流程。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "路徑式授權",
+      "items": [
+        "`gov-group`：`GET /runs` 及四個政府端點。`frontend-group`：`GET /runs` 及四個 `/world/*` 讀取端點，包含天災排程。",
+        "群組隔離保護天災預報，政府應從 `GovernmentObservation` 取得限定資訊。`frontend-group` 用於文件中的權限驗證，瀏覽器接入方式仍待定。"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "保存方式",
+      "items": [
+        "`serve` 的即時狀態和事件在記憶體。`run`／`experiment` 啟用 `JsonlRecorder` 寫入指標、事件、居民、天災、記憶與 LLM 呼叫。",
+        "PostgreSQL 有初始化 schema，`PostgresRecorder` 仍未實作。digiRunner 設定由獨立 H2 volume `dgrdb` 保存。"
+      ]
+    }
+  ]
+}

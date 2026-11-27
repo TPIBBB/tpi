@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "17f45cd2-7c2d-40b9-bf09-f22e57c2ca52",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "C:\\GitHub\\tpiB merge\\.archify\\architecture-tpib-detail-20261127-110939\\sources\\tpib-digirunner\\candidate.json",
+  "output": "C:\\GitHub\\tpiB merge\\.archify\\architecture-tpib-detail-20261127-110939\\tpib-digirunner.html",
+  "specification": {
+    "sha256": "fe530a89d17052ea2aa9160f01080722801e85bf9066cd70326bc1e13aead843",
+    "bytes": 8143
+  },
+  "artifact": {
+    "sha256": "e610cc57fb91f93473697630fb204489cb5f17bdc63e2c3e0296d2e69414351f",
+    "bytes": 857959
+  }
+}

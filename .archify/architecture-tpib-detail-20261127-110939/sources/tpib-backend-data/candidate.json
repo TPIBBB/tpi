@@ -1,0 +1,684 @@
+{
+  "schema_version": 1,
+  "diagram_type": "class",
+  "meta": {
+    "title": "TPIB 後端資料結構｜引擎狀態與政府契約",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-tpib-detail-20261127-110939/tpib-backend-data.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/TPIBBB/tpi.git",
+      "revision": "b1ada53484565debb029139ba289a779d47c8af8",
+      "provider": "github"
+    }
+  },
+  "layout": {
+    "mode": "grid",
+    "typeW": 230,
+    "typeMaxW": 285,
+    "gapX": 92,
+    "gapY": 86
+  },
+  "types": [
+    {
+      "id": "event",
+      "label": "Event",
+      "kind": "record",
+      "sublabel": "事件與唯讀 SimEvent 的來源",
+      "row": 0,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "int"
+        },
+        {
+          "name": "kind",
+          "type": "str"
+        },
+        {
+          "name": "actor",
+          "type": "str | None"
+        },
+        {
+          "name": "success",
+          "type": "bool"
+        },
+        {
+          "name": "payload",
+          "type": "dict[str, Any]"
+        },
+        {
+          "name": "message",
+          "type": "str"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 82,
+          "end_line": 91,
+          "label": "事件 dataclass"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 43,
+          "end_line": 52,
+          "label": "FastAPI 的記憶體事件清單"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 76,
+          "end_line": 78,
+          "label": "依 since_tick 篩選與輸出"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "label": "SimulationEngine",
+      "kind": "class",
+      "sublabel": "選列關鍵狀態與操作",
+      "row": 0,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "world",
+          "type": "WorldState"
+        },
+        {
+          "name": "history",
+          "type": "list[dict]"
+        },
+        {
+          "name": "cycle_history",
+          "type": "list[dict]"
+        },
+        {
+          "name": "schedule",
+          "type": "list[Disaster]"
+        },
+        {
+          "name": "band",
+          "type": "EquilibriumBand | None"
+        },
+        {
+          "name": "memory",
+          "type": "str"
+        },
+        {
+          "name": "memory_versions",
+          "type": "list[str]"
+        },
+        {
+          "name": "pending_reflection",
+          "type": "dict | None"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 43,
+          "end_line": 88,
+          "label": "狀態、排程與反思資料"
+        },
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 91,
+          "end_line": 98,
+          "label": "每週期歷史狀態"
+        },
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 207,
+          "end_line": 231,
+          "label": "指標、天災與回合更新"
+        }
+      ],
+      "methods": [
+        {
+          "name": "step",
+          "parameters": "decisions",
+          "returns": "list[Event]"
+        },
+        {
+          "name": "government_observation",
+          "returns": "GovernmentObservation"
+        }
+      ]
+    },
+    {
+      "id": "disaster",
+      "label": "Disaster",
+      "kind": "record",
+      "sublabel": "天災排程中的每個週期",
+      "row": 0,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "int"
+        },
+        {
+          "name": "kind",
+          "type": "str"
+        },
+        {
+          "name": "cycle_start",
+          "type": "int"
+        },
+        {
+          "name": "start_tick",
+          "type": "int"
+        },
+        {
+          "name": "end_tick",
+          "type": "int"
+        },
+        {
+          "name": "window_end",
+          "type": "int"
+        },
+        {
+          "name": "food_multiplier",
+          "type": "float"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/world/disasters.py",
+          "line": 18,
+          "end_line": 35,
+          "label": "天災排程欄位與階段"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 80,
+          "end_line": 83,
+          "label": "API 直接輸出排程"
+        }
+      ]
+    },
+    {
+      "id": "gov-observation",
+      "label": "GovernmentObservation",
+      "kind": "record",
+      "sublabel": "政府只讀的當期觀察",
+      "row": 1,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "int"
+        },
+        {
+          "name": "prices",
+          "type": "dict[str, float]"
+        },
+        {
+          "name": "memory",
+          "type": "str | None"
+        },
+        {
+          "name": "rules",
+          "type": "list[str]"
+        },
+        {
+          "name": "budget",
+          "type": "float"
+        },
+        {
+          "name": "food_reserve",
+          "type": "float"
+        },
+        {
+          "name": "population",
+          "type": "int"
+        },
+        {
+          "name": "deaths",
+          "type": "int"
+        },
+        {
+          "name": "hungry",
+          "type": "int"
+        },
+        {
+          "name": "price_cap",
+          "type": "dict | None"
+        },
+        {
+          "name": "citizens",
+          "type": "list[dict[str, str]]"
+        },
+        {
+          "name": "recent_decisions",
+          "type": "list[dict]"
+        },
+        {
+          "name": "price_history",
+          "type": "list[dict]"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/world/government.py",
+          "line": 53,
+          "end_line": 75,
+          "label": "觀察 dataclass"
+        },
+        {
+          "path": "backend/src/civsim/world/engine.py",
+          "line": 125,
+          "end_line": 149,
+          "label": "依設定選擇觀察範圍"
+        },
+        {
+          "path": "backend/src/civsim/gateway/serialize.py",
+          "line": 11,
+          "end_line": 16,
+          "label": "Python dataclass 與 JSON 轉換"
+        }
+      ]
+    },
+    {
+      "id": "world",
+      "label": "WorldState",
+      "kind": "record",
+      "sublabel": "模擬引擎內的可變世界",
+      "row": 1,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "tick",
+          "type": "int"
+        },
+        {
+          "name": "citizens",
+          "type": "dict[str, Citizen]"
+        },
+        {
+          "name": "government",
+          "type": "Government"
+        },
+        {
+          "name": "market",
+          "type": "Market"
+        },
+        {
+          "name": "food_multiplier",
+          "type": "float"
+        },
+        {
+          "name": "phase",
+          "type": "str"
+        },
+        {
+          "name": "disaster_id",
+          "type": "int | None"
+        },
+        {
+          "name": "deaths",
+          "type": "int"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 142,
+          "end_line": 154,
+          "label": "具名居民字典與子物件"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 54,
+          "end_line": 70,
+          "label": "對外只讀投影"
+        }
+      ]
+    },
+    {
+      "id": "gov-decision",
+      "label": "GovernmentDecision",
+      "kind": "record",
+      "sublabel": "通過 API 轉換後的決策",
+      "row": 1,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "type",
+          "type": "GovernmentActionType"
+        },
+        {
+          "name": "params",
+          "type": "dict[str, Any]"
+        },
+        {
+          "name": "reason",
+          "type": "str"
+        },
+        {
+          "name": "replayed",
+          "type": "bool"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/world/government.py",
+          "line": 24,
+          "end_line": 50,
+          "label": "可用決策與 dataclass"
+        },
+        {
+          "path": "backend/src/civsim/api/government.py",
+          "line": 135,
+          "end_line": 163,
+          "label": "檢查 tick、轉換並交給引擎"
+        },
+        {
+          "path": "backend/src/civsim/gateway/serialize.py",
+          "line": 19,
+          "end_line": 26,
+          "label": "決策 JSON 欄位"
+        }
+      ]
+    },
+    {
+      "id": "citizen",
+      "label": "Citizen",
+      "kind": "record",
+      "sublabel": "依 ID 存在 WorldState.citizens",
+      "row": 2,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "str"
+        },
+        {
+          "name": "type",
+          "type": "CitizenType"
+        },
+        {
+          "name": "persona",
+          "type": "Persona"
+        },
+        {
+          "name": "food",
+          "type": "float"
+        },
+        {
+          "name": "money",
+          "type": "float"
+        },
+        {
+          "name": "alive",
+          "type": "bool"
+        },
+        {
+          "name": "hungry_days",
+          "type": "int"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 63,
+          "end_line": 71,
+          "label": "居民與個性欄位"
+        },
+        {
+          "path": "backend/src/civsim/api/server.py",
+          "line": 65,
+          "end_line": 69,
+          "label": "對外排除 Persona"
+        }
+      ]
+    },
+    {
+      "id": "market",
+      "label": "Market",
+      "kind": "record",
+      "sublabel": "市價、貨幣與限價",
+      "row": 2,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "price",
+          "type": "float"
+        },
+        {
+          "name": "base_price",
+          "type": "float"
+        },
+        {
+          "name": "initial_money",
+          "type": "float"
+        },
+        {
+          "name": "currency_issued",
+          "type": "float"
+        },
+        {
+          "name": "price_cap",
+          "type": "float | None"
+        },
+        {
+          "name": "price_cap_until",
+          "type": "int | None"
+        },
+        {
+          "name": "orders",
+          "type": "list[Order]"
+        },
+        {
+          "name": "customary_price",
+          "type": "float（計算屬性）"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 116,
+          "end_line": 133,
+          "label": "市場欄位與計算屬性"
+        }
+      ]
+    },
+    {
+      "id": "government-assets",
+      "label": "Government",
+      "kind": "record",
+      "sublabel": "引擎中的政府資產",
+      "row": 2,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "budget",
+          "type": "float"
+        },
+        {
+          "name": "food_reserve",
+          "type": "float"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 136,
+          "end_line": 139,
+          "label": "政府資產欄位"
+        }
+      ]
+    },
+    {
+      "id": "persona",
+      "label": "Persona",
+      "kind": "record",
+      "sublabel": "居民行為參數",
+      "row": 3,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "complies",
+          "type": "bool"
+        },
+        {
+          "name": "sloth",
+          "type": "float"
+        },
+        {
+          "name": "greed",
+          "type": "float"
+        },
+        {
+          "name": "risk_tolerance",
+          "type": "float"
+        },
+        {
+          "name": "gluttony",
+          "type": "float"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 49,
+          "end_line": 60,
+          "label": "個性參數"
+        }
+      ]
+    },
+    {
+      "id": "order",
+      "label": "Order",
+      "kind": "record",
+      "sublabel": "集合競價的買賣單",
+      "row": 3,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "owner",
+          "type": "str"
+        },
+        {
+          "name": "side",
+          "type": "str"
+        },
+        {
+          "name": "qty",
+          "type": "float"
+        },
+        {
+          "name": "price",
+          "type": "float"
+        }
+      ],
+      "sources": [
+        {
+          "path": "backend/src/civsim/models.py",
+          "line": 106,
+          "end_line": 113,
+          "label": "掛單模型與資源預扣"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "engine-event",
+      "from": "engine",
+      "to": "event",
+      "kind": "dependency"
+    },
+    {
+      "id": "engine-disaster",
+      "from": "engine",
+      "to": "disaster",
+      "kind": "composition"
+    },
+    {
+      "id": "engine-world",
+      "from": "engine",
+      "to": "world",
+      "kind": "composition"
+    },
+    {
+      "id": "engine-gov-observation",
+      "from": "engine",
+      "to": "gov-observation",
+      "kind": "dependency"
+    },
+    {
+      "id": "engine-gov-decision",
+      "from": "engine",
+      "to": "gov-decision",
+      "kind": "dependency"
+    },
+    {
+      "id": "world-citizen",
+      "from": "world",
+      "to": "citizen",
+      "kind": "composition"
+    },
+    {
+      "id": "world-market",
+      "from": "world",
+      "to": "market",
+      "kind": "composition"
+    },
+    {
+      "id": "world-government-assets",
+      "from": "world",
+      "to": "government-assets",
+      "kind": "composition"
+    },
+    {
+      "id": "citizen-persona",
+      "from": "citizen",
+      "to": "persona",
+      "kind": "composition"
+    },
+    {
+      "id": "market-order",
+      "from": "market",
+      "to": "order",
+      "kind": "composition"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端 JSON 的來源",
+      "items": [
+        "state：引擎 WorldState → 市場摘要、政府資產、居民陣列與 band。metrics：snapshot_metrics(world, clearing, events, day) 加入 engine.history。events：world-api 把結算及反思事件追加到 event_log，GET 依 since_tick 過濾。",
+        "metrics 的 day 是該天災週期的第幾天。歷史指標與事件各有自己的清單；回合結算並非重新用 API 即時算一次。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "政府 API 的資料包裝",
+      "items": [
+        "GET /runs 回傳 {run_id, config, seed, status, tick, total_ticks}[]。其餘政府路徑位於 /runs/{rid}/government/ 下。",
+        "GET observation 回傳 {run_id, status, observation}。POST decisions 接受 {tick, actions: [{type, params, reason, replayed}]}，回傳 {run_id, tick, decisions, price, status, next_tick}。",
+        "GET reflections 回傳 {run_id, status, report, memory}。POST memory 接受 {memory: string | null, reason}，回傳 {run_id, memory_result, memory_version, status, next_tick}。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "觀察範圍與回合狀態",
+      "items": [
+        "政府觀察中的 citizens 只有存活居民的 id、type；不提供其庫存、預先排程、均衡區間。社會規則僅在 enforce 模式送出；未開記憶時 memory 為 null。",
+        "狀態為 awaiting_decision、awaiting_reflection 或 finished。run ID、狀態與決策 tick 由 API 檢查；引擎再判斷個別行動的資源、限制與社會規則。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "紀錄與保存",
+      "items": [
+        "serve 以 NullRecorder 跑即時 API。單機 run／experiment 可持久化 events、metrics、citizens、disasters、memory、llm_calls 等 JSONL，另寫 meta.json、summary.json。",
+        "PostgreSQL schema 已存在，但 PostgresRecorder 尚未接通。持久化的單機實驗與前端已發布檔是獨立的目錄。"
+      ]
+    }
+  ]
+}
