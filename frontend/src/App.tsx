@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { listRuns, loadRun, parseJsonl, type PublishedRun } from "./api/client";
-import { PHASE_LABEL, type EquilibriumBand, type TickMetrics } from "./api/types";
+import { PHASE_LABEL, type DisasterReport, type EquilibriumBand, type TickMetrics } from "./api/types";
 import { AgentTable } from "./components/AgentTable";
+import { DecisionPanel } from "./components/DecisionPanel";
 import { EventTimeline } from "./components/EventTimeline";
 import { MarketPanel } from "./components/MarketPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
@@ -18,6 +19,7 @@ function runFromUrl(): string | null {
 export default function App() {
   const [offlineFile, setOfflineFile] = useState<string | null>(null);
   const [offlineBand, setOfflineBand] = useState<EquilibriumBand | null>(null);
+  const [reports, setReports] = useState<DisasterReport[]>([]);
   const [runs, setRuns] = useState<PublishedRun[]>([]);
   const [runId, setRunId] = useState<string | null>(runFromUrl());
   const [runError, setRunError] = useState<string | null>(null);
@@ -41,9 +43,10 @@ export default function App() {
     window.history.replaceState(null, "", url);
     setRunError(null);
     loadRun(runId)
-      .then(({ metrics, band }) => {
+      .then(({ metrics, band, reports }) => {
         setMetrics(metrics);
         setOfflineBand(band);
+        setReports(reports);
         setOfflineFile(null);
       })
       .catch((err) => setRunError(`讀不到實驗 ${runId}：${err}`));
@@ -52,12 +55,14 @@ export default function App() {
   async function loadFile(file: File) {
     setMetrics(parseJsonl<TickMetrics>(await file.text()));
     setOfflineBand(null);
+    setReports([]);
     setOfflineFile(file.name);
     setRunId(null);
   }
 
   function backToLive() {
     setOfflineFile(null);
+    setReports([]);
     setRunId(null);
     const url = new URL(window.location.href);
     url.searchParams.delete("run");
@@ -105,6 +110,7 @@ export default function App() {
         </div>
       )}
       <PriceChart metrics={metrics} band={live ? (state?.band ?? null) : offlineBand} />
+      {runId !== null && <DecisionPanel reports={reports} />}
       <MetricsPanel metrics={metrics} />
       {live && state && <AgentTable citizens={state.citizens} />}
     </main>
